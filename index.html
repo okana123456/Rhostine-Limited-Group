@@ -137,6 +137,17 @@ label{display:block;font-size:12px;font-weight:600;color:var(--text-muted);margi
 .kpi .l{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);font-weight:600}
 .kpi .v{font-size:24px;font-weight:700;margin-top:6px;letter-spacing:-.02em}
 .kpi .d{font-size:12px;color:var(--text-muted);margin-top:3px}
+.collection-panel{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--success);border-radius:var(--radius-lg);padding:18px;margin-bottom:20px}
+.collection-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:16px}
+.collection-head h3{margin:0;font-size:16px}
+.collection-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--border);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.collection-metric{background:var(--surface);padding:14px;min-width:0}
+.collection-metric .label{font-size:11px;text-transform:uppercase;color:var(--text-muted);font-weight:600}
+.collection-metric .amount{font-size:20px;font-weight:700;margin-top:5px;white-space:nowrap}
+.collection-metric .detail{font-size:11px;color:var(--text-muted);margin-top:3px}
+.collection-progress{height:10px;background:var(--surface-2);border-radius:5px;overflow:hidden;margin-top:14px}
+.collection-progress>div{height:100%;background:var(--success);transition:width .25s}
+@media(max-width:768px){.collection-metrics{grid-template-columns:1fr 1fr}.collection-metric .amount{font-size:17px}.collection-head{align-items:center}}
 
 /* Tables */
 .table-wrap{width:100%;max-width:100%;overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface)}
@@ -880,7 +891,7 @@ function memberLoan(memberId){
   return state.data.loans.find(l=>l.member_id===memberId && l.status==='active');
 }
 function loanRepaymentPaid(loanId){
-  return state.data.repayments.filter(r=>r.loan_id===loanId && r.status!=='pending').reduce((a,b)=>a + Number(b.amount||0), 0);
+  return state.data.repayments.filter(r=>r.loan_id===loanId && r.status==='approved').reduce((a,b)=>a + Number(b.amount||0), 0);
 }
 function loanPaid(loanId){
   return loanRepaymentPaid(loanId);
@@ -890,6 +901,10 @@ function localDateFromISO(dateStr){
   const [y,m,d] = s.split('-').map(Number);
   if(!y || !m || !d) return null;
   return new Date(y, m - 1, d);
+}
+function localDateISO(date){
+  const y=date.getFullYear(), m=String(date.getMonth()+1).padStart(2,'0'), d=String(date.getDate()).padStart(2,'0');
+  return `${y}-${m}-${d}`;
 }
 function loanWeeksElapsed(loan, asOf=todayISO()){
   const start = localDateFromISO(loan?.start_date);
@@ -929,6 +944,37 @@ function expectedCollectionSummary(loans, asOf=todayISO()){
     arrears: dueLoans.reduce((a,l)=>a + loanArrearsAsOf(l, asOf), 0)
   };
 }
+function collectionPerformance(loans, asOf=todayISO()){
+  const dueLoans=(loans||[]).filter(l=>loanExpectedCollectionOnDate(l,asOf)>0);
+  let dueAmount=0, paidTowardDue=0, paidCount=0;
+  dueLoans.forEach(l=>{
+    const due=loanExpectedCollectionOnDate(l,asOf);
+    const paid=state.data.repayments
+      .filter(r=>r.loan_id===l.id && r.status==='approved' && String(r.meeting_date||r.created_at||'').slice(0,10)===asOf)
+      .reduce((sum,r)=>sum+Number(r.amount||0),0);
+    dueAmount+=due;
+    paidTowardDue+=Math.min(due,paid);
+    if(paid>=due) paidCount++;
+  });
+  const unpaidAmount=Math.max(0,dueAmount-paidTowardDue);
+  const rate=dueAmount>0?Math.min(100,(paidTowardDue/dueAmount)*100):0;
+  const arrears=(loans||[]).reduce((sum,l)=>sum+loanArrearsAsOf(l,asOf),0);
+  return {dueAmount,paidTowardDue,unpaidAmount,rate,dueCount:dueLoans.length,paidCount,unpaidCount:dueLoans.length-paidCount,arrears};
+}
+function renderCollectionPanel(perf,date,title='Collection performance'){
+  const rateLabel=perf.dueCount?`${perf.rate.toFixed(1)}% collected`:'No collections due';
+  const rateClass=!perf.dueCount?'b-grey':perf.rate>=80?'b-green':perf.rate>=50?'b-yellow':'b-red';
+  return `<div class="collection-panel">
+    <div class="collection-head"><div><h3>${title}</h3><div class="muted" style="font-size:12px;margin-top:3px">Weekly collections due on ${fmtDate(date)}</div></div><span class="badge ${rateClass}">${rateLabel}</span></div>
+    <div class="collection-metrics">
+      <div class="collection-metric"><div class="label">Total due</div><div class="amount">${KES(perf.dueAmount)}</div><div class="detail">${perf.dueCount} loan(s)</div></div>
+      <div class="collection-metric"><div class="label">Paid against due</div><div class="amount" style="color:var(--success)">${KES(perf.paidTowardDue)}</div><div class="detail">${perf.paidCount} fully paid</div></div>
+      <div class="collection-metric"><div class="label">Unpaid due</div><div class="amount" style="color:${perf.unpaidAmount>0?'var(--danger)':'var(--text)'}">${KES(perf.unpaidAmount)}</div><div class="detail">${perf.unpaidCount} unpaid or part-paid</div></div>
+      <div class="collection-metric"><div class="label">Portfolio arrears</div><div class="amount" style="color:${perf.arrears>0?'var(--warning)':'var(--text)'}">${KES(perf.arrears)}</div><div class="detail">accumulated by this date</div></div>
+    </div>
+    <div class="collection-progress"><div style="width:${perf.rate}%"></div></div>
+  </div>`;
+}
 function loanNextDueDate(loan, asOf=todayISO()){
   const start = localDateFromISO(loan?.start_date);
   const today = localDateFromISO(asOf);
@@ -936,7 +982,7 @@ function loanNextDueDate(loan, asOf=todayISO()){
   for(let w = 1; w <= 1040; w++){
     const d = new Date(start);
     d.setDate(d.getDate() + 7 * w);
-    const ds = d.toISOString().slice(0,10);
+    const ds = localDateISO(d);
     if(ds >= asOf) return ds;
   }
   return null;
@@ -1798,26 +1844,31 @@ function pageDashboard(){
     return cd >= start && cd <= end;
   };
 
-  const savings = state.data.savings.filter(s => inRangeFallback(s.meeting_date||'', s.created_at) && s.status !== 'pending');
-  const repayments = state.data.repayments.filter(r => inRangeFallback(r.meeting_date||'', r.created_at) && r.status !== 'pending');
+  const savings = state.data.savings.filter(s => inRangeFallback(s.meeting_date||'', s.created_at) && s.status === 'approved');
+  const repayments = state.data.repayments.filter(r => inRangeFallback(r.meeting_date||'', r.created_at) && r.status === 'approved');
   const totalSavings = savings.reduce((a,b)=>a+Number(b.amount||0),0);
   const allTimeSavings = state.data.savings
-    .filter(s => s.status !== 'pending' && (!s.type || s.type === 'savings'))
+    .filter(s => s.status === 'approved' && (!s.type || s.type === 'savings'))
     .reduce((a,b)=>a+Number(b.amount||0),0);
   const totalRepay = repayments.reduce((a,b)=>a+Number(b.amount||0),0);
   const activeLoans = state.data.loans.filter(l=>l.status==='active');
   const outstandingBal = activeLoans.reduce((a,l)=>a+(Number(l.total_payable||0)-loanPaid(l.id)),0);
   const expectedDate = _expectedCollectionDate || todayISO();
   const expectedToday = expectedCollectionSummary(activeLoans, expectedDate);
+  const collection = collectionPerformance(activeLoans, expectedDate);
   const interestEarned = repayments.reduce((a,r)=>a+Number(r.interest||0),0);
   const eligibleCount = state.data.members.filter(m=>memberEligible(m.id)).length;
+  const newMembers = state.data.members.filter(m=>inRangeFallback(m.registered_on||'',m.created_at));
+  const disbursedLoans = state.data.loans.filter(l=>inRangeFallback(l.start_date||'',l.created_at));
+  const disbursedValue = disbursedLoans.reduce((sum,l)=>sum+Number(l.loan_value||0),0);
+  const attentionLoans = state.data.loans.filter(l=>l.status==='defaulted'||(l.status==='active'&&loanArrearsAsOf(l,expectedDate)>0));
 
   // Officer performance - active loan officers only
   const officers = state.data.staff.filter(s => s.role==='officer' && s.status==='active');
   const todayISO_ = todayISO();
   const officerPerf = officers.map(o => {
-    const oSav = state.data.savings.filter(s=>s.recorded_by===o.id && inRangeFallback(s.meeting_date||'', s.created_at) && s.status !== 'pending').reduce((a,b)=>a+Number(b.amount||0),0);
-    const oRep = state.data.repayments.filter(r=>r.recorded_by===o.id && inRangeFallback(r.meeting_date||'', r.created_at) && r.status !== 'pending').reduce((a,b)=>a+Number(b.amount||0),0);
+    const oSav = state.data.savings.filter(s=>s.recorded_by===o.id && inRangeFallback(s.meeting_date||'', s.created_at) && s.status === 'approved').reduce((a,b)=>a+Number(b.amount||0),0);
+    const oRep = state.data.repayments.filter(r=>r.recorded_by===o.id && inRangeFallback(r.meeting_date||'', r.created_at) && r.status === 'approved').reduce((a,b)=>a+Number(b.amount||0),0);
     const activeOfficerLoans = state.data.loans.filter(l=>l.officer_id===o.id && l.status==='active');
     const oLoans = activeOfficerLoans.reduce((a,b)=>a+Number(b.loan_value||0),0);
     const oOutstanding = activeOfficerLoans.reduce((a,l)=>a+loanOutstanding(l),0);
@@ -1848,6 +1899,9 @@ function pageDashboard(){
     </div>
 
       <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
+      <div class="kpi k-warn"><div class="l">New members</div><div class="v">${newMembers.length}</div><div class="d">registered in selected period</div></div>
+      <div class="kpi k-primary"><div class="l">Loans disbursed</div><div class="v">${disbursedLoans.length}</div><div class="d">${KES(disbursedValue)} issued</div></div>
+      <div class="kpi ${attentionLoans.length?'k-danger':'k-success'}"><div class="l">Loans needing attention</div><div class="v">${attentionLoans.length}</div><div class="d">in arrears or defaulted</div></div>
       <div class="kpi k-primary"><div class="l">Savings collected</div><div class="v">${KES(totalSavings)}</div><div class="d">${savings.length} entries</div></div>
       <div class="kpi k-success"><div class="l">All-time savings</div><div class="v">${KES(allTimeSavings)}</div><div class="d">approved savings only</div></div>
       <div class="kpi k-primary"><div class="l">Expected collection</div><div class="v">${KES(expectedToday.amount)}</div><div class="d">${fmtDate(expectedDate)} - ${expectedToday.count} loan(s) due</div></div>
@@ -1856,6 +1910,8 @@ function pageDashboard(){
       <div class="kpi k-warn"><div class="l">Members</div><div class="v">${state.data.members.length}</div><div class="d">${eligibleCount} loan-eligible</div></div>
       <div class="kpi k-primary"><div class="l">Groups</div><div class="v">${state.data.groups.length}</div><div class="d">${state.data.groups.filter(g=>g.status==='active').length} active</div></div>
     </div>
+
+    ${renderCollectionPanel(collection,expectedDate)}
 
     <div style="display:flex;flex-direction:column;gap:16px;margin-top:4px">
       <div class="card" style="min-width:0">
@@ -2025,10 +2081,11 @@ function pageOfficerDashboard(){
     if(createdAt){ const cd = new Date(createdAt).toISOString().slice(0,10); if(cd >= start && cd <= end) return true; }
     return false;
   };
-  const mySavings = state.data.savings.filter(s=>s.recorded_by===me.id && inRangeOff(s.meeting_date, s.created_at) && s.status !== 'pending');
-  const myRepay = state.data.repayments.filter(r=>r.recorded_by===me.id && inRangeOff(r.meeting_date, r.created_at) && r.status !== 'pending');
+  const mySavings = state.data.savings.filter(s=>s.recorded_by===me.id && inRangeOff(s.meeting_date, s.created_at) && s.status === 'approved');
+  const myRepay = state.data.repayments.filter(r=>r.recorded_by===me.id && inRangeOff(r.meeting_date, r.created_at) && r.status === 'approved');
   const myGroupIds = new Set(myGroups.map(g=>g.id));
-  const myLoans = state.data.loans.filter(l=>l.status==='active' && (l.officer_id===me.id || myGroupIds.has(l.group_id)));
+  const myPortfolioLoans = state.data.loans.filter(l=>l.officer_id===me.id || myGroupIds.has(l.group_id));
+  const myLoans = myPortfolioLoans.filter(l=>l.status==='active');
   const totalSv = mySavings.reduce((a,b)=>a+Number(b.amount||0),0);
   const totalRp = myRepay.reduce((a,b)=>a+Number(b.amount||0),0);
   const myOutstandingBal = myLoans.reduce((a,l)=>a+(Number(l.total_payable||0)-loanPaid(l.id)),0);
@@ -2042,6 +2099,11 @@ function pageOfficerDashboard(){
   const myLoansIssuedToday = state.data.loans.filter(l=>l.status==='active' && l.officer_id===me.id && (l.start_date||'').slice(0,10)===todayStr).reduce((a,b)=>a+Number(b.loan_value||0),0);
   const expectedDate = _expectedCollectionDate || todayISO();
   const myExpectedToday = expectedCollectionSummary(myLoans, expectedDate);
+  const myCollection = collectionPerformance(myLoans, expectedDate);
+  const myNewMembers = myMembers.filter(m=>inRangeOff(m.registered_on,m.created_at));
+  const myDisbursedLoans = myPortfolioLoans.filter(l=>inRangeOff(l.start_date,l.created_at));
+  const myDisbursedValue = myDisbursedLoans.reduce((sum,l)=>sum+Number(l.loan_value||0),0);
+  const myAttentionLoans = myPortfolioLoans.filter(l=>l.status==='defaulted'||(l.status==='active'&&loanArrearsAsOf(l,expectedDate)>0));
 
   const filterBtns = [
     ['today','Today'],['yesterday','Yesterday'],['week','This week'],['month','Last month'],['3months','Last 3 months'],['custom','Custom']
@@ -2061,6 +2123,9 @@ function pageOfficerDashboard(){
       </div>
     </div>
     <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
+      <div class="kpi k-warn"><div class="l">New members</div><div class="v">${myNewMembers.length}</div><div class="d">registered in my groups</div></div>
+      <div class="kpi k-primary"><div class="l">Loans disbursed</div><div class="v">${myDisbursedLoans.length}</div><div class="d">${KES(myDisbursedValue)} issued</div></div>
+      <div class="kpi ${myAttentionLoans.length?'k-danger':'k-success'}"><div class="l">Loans needing attention</div><div class="v">${myAttentionLoans.length}</div><div class="d">in arrears or defaulted</div></div>
       <div class="kpi k-primary"><div class="l">My groups</div><div class="v">${myGroups.length}</div></div>
       <div class="kpi k-success"><div class="l">Savings recorded</div><div class="v">${KES(totalSv)}</div><div class="d">${mySavings.length} approved entries</div></div>
       <div class="kpi"><div class="l">Repayments recorded</div><div class="v">${KES(totalRp)}</div><div class="d">Interest ${KES(myInterestEarned)}</div></div>
@@ -2075,6 +2140,7 @@ function pageOfficerDashboard(){
         <div class="d">${myPendingSavings.length > 0 ? `Savings: ${KES(myPendingSavingsTotal)} (${myPendingSavings.length})` : ''}${myPendingSavings.length > 0 && myPendingRepayments.length > 0 ? ' - ' : ''}${myPendingRepayments.length > 0 ? `Repayments: ${KES(myPendingRepaymentsTotal)} (${myPendingRepayments.length})` : ''}</div>
       </div>` : ''}
     </div>
+    ${renderCollectionPanel(myCollection,expectedDate,'My collection performance')}
     <div class="card" style="margin-top:16px">
       <div class="card-head"><h3>My groups</h3><div class="sub">Savings &amp; repayments today = ${todayStr}</div></div>
       <div style="overflow-x:auto"><table class="tbl">
@@ -2087,10 +2153,10 @@ function pageOfficerDashboard(){
           ${myGroups.map(g=>{
             const mc = state.data.members.filter(m=>m.group_id===g.id).length;
             const savToday = state.data.savings
-              .filter(s=>s.group_id===g.id && s.status!=='pending' && (s.meeting_date||'').slice(0,10)===todayStr)
+              .filter(s=>s.group_id===g.id && s.status==='approved' && (s.meeting_date||'').slice(0,10)===todayStr)
               .reduce((a,b)=>a+Number(b.amount||0),0);
             const repToday = state.data.repayments
-              .filter(r=>r.group_id===g.id && r.status!=='pending' && (r.meeting_date||'').slice(0,10)===todayStr)
+              .filter(r=>r.group_id===g.id && r.status==='approved' && (r.meeting_date||'').slice(0,10)===todayStr)
               .reduce((a,b)=>a+Number(b.amount||0),0);
             return `<tr>
               <td><b>${g.name}</b></td>
