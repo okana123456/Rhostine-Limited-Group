@@ -1,0 +1,16 @@
+{
+  "audit_time": "2026-08-24",
+  "scope": "rh_settings maximum loan term default",
+  "settings_rows": 0,
+  "rows_at_52_weeks": 0,
+  "rows_at_50_weeks": 0,
+  "settings_backup": [],
+  "financial_table_counts": {
+    "rh_loans": 0,
+    "rh_repayments": 0,
+    "rh_savings": 0,
+    "rh_expenses": 0
+  },
+  "financial_rows_changed": 0,
+  "rollback": "Run 20260824150000_confirmed_loan_policy.rollback.sql to restore the 52-week default."
+}

@@ -481,34 +481,42 @@ const state = {
   loading: true
 };
 
-/* Provisional Rhostine cash-loan bands, reconciled from the supplied sheets.
- * All amounts are editable in Settings once the signed product schedule is confirmed. */
-const RHOSTINE_LOAN_BANDS = [
-  { cycle:1, principal:10000, savings:1600,  weekly:472,  insurance:913,  weeks:24, totalPayable:11328, source:'sheet' },
-  { cycle:1, principal:15000, savings:2550,  weekly:730,  insurance:1119, weeks:24, totalPayable:17520, source:'sheet' },
-  { cycle:1, principal:20000, savings:3500,  weekly:944,  insurance:1300, weeks:24, totalPayable:22656, source:'sheet' },
-  { cycle:1, principal:25000, savings:5000,  weekly:1180, insurance:1413, weeks:24, totalPayable:28320, source:'sheet' },
-  { cycle:1, principal:30000, savings:6600,  weekly:1416, insurance:1639, weeks:24, totalPayable:33984, source:'sheet' },
-  { cycle:1, principal:35000, savings:8750,  weekly:1652, insurance:2044, weeks:24, totalPayable:39648, source:'reconciled' },
-  { cycle:1, principal:40000, savings:10000, weekly:1888, insurance:2336, weeks:24, totalPayable:45312, source:'reconciled' },
-  { cycle:1, principal:50000, savings:12500, weekly:2360, insurance:2920, weeks:24, totalPayable:56640, source:'reconciled' },
-  { cycle:2, principal:35000, savings:9000,  weekly:1167, insurance:1995, weeks:36, totalPayable:42000, source:'sheet' },
-  { cycle:2, principal:40000, savings:10000, weekly:992,  insurance:2261, weeks:50, totalPayable:49600, source:'reconciled' },
-  { cycle:2, principal:45000, savings:11250, weekly:1116, insurance:2628, weeks:50, totalPayable:55800, source:'reconciled' },
-  { cycle:2, principal:50000, savings:12500, weekly:1240, insurance:2920, weeks:50, totalPayable:62000, source:'sheet' },
-  { cycle:2, principal:55000, savings:14000, weekly:1364, insurance:3212, weeks:50, totalPayable:68200, source:'sheet' },
-  { cycle:2, principal:60000, savings:15000, weekly:1488, insurance:3504, weeks:50, totalPayable:74400, source:'sheet' },
-  { cycle:2, principal:65000, savings:16250, weekly:1612, insurance:3796, weeks:50, totalPayable:80600, source:'sheet' },
-  { cycle:2, principal:70000, savings:23100, weekly:1736, insurance:4078, weeks:50, totalPayable:86800, source:'sheet' },
-  { cycle:2, principal:75000, savings:24750, weekly:1860, insurance:4380, weeks:50, totalPayable:93000, source:'reconciled' },
-  { cycle:2, principal:80000, savings:26400, weekly:1984, insurance:4672, weeks:50, totalPayable:99200, source:'sheet' },
-  { cycle:2, principal:85000, savings:28050, weekly:2108, insurance:4964, weeks:50, totalPayable:105400, source:'sheet' },
-  { cycle:2, principal:90000, savings:29700, weekly:2232, insurance:5256, weeks:50, totalPayable:111600, source:'sheet' },
-  { cycle:2, principal:95000, savings:31350, weekly:2356, insurance:5548, weeks:50, totalPayable:117800, source:'sheet' },
-  { cycle:2, principal:100000,savings:33000, weekly:2480, insurance:5840, weeks:50, totalPayable:124000, source:'sheet' }
-];
-function loanBand(cycle, principal){
-  return RHOSTINE_LOAN_BANDS.find(b => b.cycle === Number(cycle) && b.principal === Number(principal));
+/* Confirmed Rhostine cash-loan policy. All screens and new loans use these formulas. */
+const RHOSTINE_TERM_OPTIONS = {
+  6:  { months:6,  weeks:25, interestRate:18 },
+  9:  { months:9,  weeks:36, interestRate:20 },
+  12: { months:12, weeks:50, interestRate:24 }
+};
+const RHOSTINE_PRINCIPALS = Array.from({length:20}, (_,i)=>(i+1)*5000);
+function requiredSavingsFor(principal){
+  const fixed = {5000:800,10000:1600,15000:2550,20000:3500,25000:5000,30000:6600,35000:9000,40000:10000,45000:11250,50000:12500,55000:14000,60000:15000,65000:16250};
+  if(principal >= 70000) return principal * .33;
+  return fixed[principal] || principal * .25;
+}
+function buildLoanProduct(principal, months){
+  const term = RHOSTINE_TERM_OPTIONS[months];
+  const cycle = principal <= 30000 ? 1 : 2;
+  const interest = principal * term.interestRate / 100;
+  const totalPayable = principal + interest;
+  const insuranceFee = totalPayable * .035;
+  const applicationFee = principal <= 35000 ? 500 : 0;
+  const processingFee = principal >= 40000 ? principal * .015 : 0;
+  const upfrontFees = insuranceFee + applicationFee + processingFee;
+  return {
+    id:`${principal}-${months}`, cycle, principal, months, weeks:term.weeks,
+    interestRate:term.interestRate, interest, totalPayable,
+    weekly:totalPayable/term.weeks, savings:requiredSavingsFor(principal),
+    insuranceFee, applicationFee, processingFee, insurance:upfrontFees,
+    netDisbursement:principal-upfrontFees, source:'confirmed'
+  };
+}
+const RHOSTINE_LOAN_PRODUCTS = RHOSTINE_PRINCIPALS.flatMap(principal => {
+  if(principal <= 30000) return [buildLoanProduct(principal, 6)];
+  if(principal === 35000) return [buildLoanProduct(principal, 9)];
+  return [6,9,12].map(months=>buildLoanProduct(principal, months));
+});
+function loanProduct(id){
+  return RHOSTINE_LOAN_PRODUCTS.find(p=>p.id===String(id));
 }
 function loanLabel(loan){
   return loan?.product_name || loan?.asset_name || `Cycle ${loan?.loan_cycle || 1} Cash Loan`;
@@ -706,7 +714,7 @@ async function signOut(){
 async function loadSettings(){
   const settingsId = state.staff?.business_id ? ('biz_' + state.staff.business_id) : 'main';
   const { data } = await sb.from('rh_settings').select('*').eq('id', settingsId).maybeSingle();
-  state.settings = data || { savings_threshold:1600, registration_fee:200, max_loan_weeks:52, business_name:'Rhostine Limited Groups' };
+  state.settings = data || { savings_threshold:1600, registration_fee:200, max_loan_weeks:50, business_name:'Rhostine Limited Groups' };
   lsSet('settings', state.settings);
 }
 
@@ -2891,7 +2899,7 @@ function pageMemberProfile(){
           const outstanding = Number(l.total_payable||0) - paid;
           const pct = Math.min(100, Math.round(paid/Number(l.total_payable||1)*100));
           const loanPerf = loanPerformance(l);
-          const schedule = computeSchedule(Number(l.loan_value), Number(l.weekly_installment), 'flat', new Date(l.start_date));
+          const schedule = computeSchedule(l);
           const today = todayISO();
           return `<div class="card" style="margin-bottom:14px">
             <div class="card-head">
@@ -3707,8 +3715,8 @@ function pageLoans(){
 function openCashLoan(){
   const members = state.data.members.filter(m => m.status !== 'inactive');
   if(!members.length) return toast('Add an active member before issuing a loan.', 'warn');
-  const bandOptions = RHOSTINE_LOAN_BANDS.map(b =>
-    `<option value="${b.cycle}:${b.principal}">Cycle ${b.cycle} - ${KES(b.principal)}</option>`
+  const bandOptions = RHOSTINE_LOAN_PRODUCTS.map(p =>
+    `<option value="${p.id}">Cycle ${p.cycle} - ${KES(p.principal)} - ${p.months} months</option>`
   ).join('');
   modal({
     title:'Issue cash loan', size:'lg',
@@ -3728,15 +3736,14 @@ function openCashLoan(){
         <div class="field"><label>Payment frequency</label><input value="Weekly" disabled /></div>
       </div>
       <div id="cl-preview" class="card card-pad" style="background:var(--surface-2);box-shadow:none"></div>
-      <div class="auth-info" style="margin:14px 0 0">These loan bands are provisional and follow the photographed schedules. Insurance is tracked separately and is not deducted automatically from the member's cash disbursement.</div>
+      <div class="auth-info" style="margin:14px 0 0">Confirmed fees are deducted before disbursement. The repayment balance contains principal and interest only.</div>
     </form>`,
     actions:[
       { label:'Cancel', onClick:closeModal },
       { label:'Issue loan', cls:'btn-primary', onClick:async()=>{
         if(!(await ensureFreshToken())) return;
         const member = state.data.members.find(m=>m.id===$('cl-member').value);
-        const [cycleValue, principalValue] = $('cl-band').value.split(':').map(Number);
-        const band = loanBand(cycleValue, principalValue);
+        const band = loanProduct($('cl-band').value);
         if(!member || !band) return toast('Select a member and loan band.', 'error');
         const activeLoan = state.data.loans.find(l=>l.member_id===member.id && l.status==='active');
         if(activeLoan) return toast('This member already has an active loan.', 'error');
@@ -3750,13 +3757,13 @@ function openCashLoan(){
         const loan = {
           business_id:state.staff.business_id||null,
           member_id:member.id, group_id:member.group_id, officer_id:group?.officer_id||null,
-          product_name:`Cycle ${band.cycle} Cash Loan`, asset_name:`Cycle ${band.cycle} Cash Loan`,
+          product_name:`Cycle ${band.cycle} Cash Loan - ${band.months} Months`, asset_name:`Cycle ${band.cycle} Cash Loan - ${band.months} Months`,
           loan_cycle:band.cycle, loan_value:band.principal, required_savings:band.savings,
-          insurance_amount:band.insurance, interest_amount:band.totalPayable-band.principal,
-          interest_rate:Number((((band.totalPayable-band.principal)/band.principal)*100).toFixed(4)),
+          insurance_amount:Number(band.insurance.toFixed(2)), interest_amount:Number(band.interest.toFixed(2)),
+          interest_rate:band.interestRate,
           weekly_installment:band.weekly, total_payable:band.totalPayable, term_weeks:band.weeks,
-          net_disbursement:band.principal, start_date:startDate,
-          expected_end_date:end.toISOString().slice(0,10), status:'active', terms_source:band.source
+          net_disbursement:Number(band.netDisbursement.toFixed(2)), start_date:startDate,
+          expected_end_date:end.toISOString().slice(0,10), status:'active', terms_source:'confirmed'
         };
         const {data,error}=await sb.from('rh_loans').insert(loan).select().single();
         if(error) return toast('Loan could not be issued: '+error.message,'error');
@@ -3770,18 +3777,19 @@ function openCashLoan(){
 function cashLoanPreview(){
   const out=$('cl-preview'); if(!out) return;
   const member=state.data.members.find(m=>m.id===$('cl-member')?.value);
-  const [cycleValue,principalValue]=($('cl-band')?.value||'1:10000').split(':').map(Number);
-  const band=loanBand(cycleValue,principalValue); if(!band) return;
+  const band=loanProduct($('cl-band')?.value||'5000-6'); if(!band) return;
   const savings=member?memberSavings(member.id):0;
-  const interest=band.totalPayable-band.principal;
-  out.innerHTML=`<div style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:10px"><strong>Cycle ${band.cycle} terms</strong><span class="badge ${band.source==='sheet'?'b-blue':'b-yellow'}">${band.source==='sheet'?'Sheet value':'Reconciled provisional'}</span></div>
+  out.innerHTML=`<div style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:10px"><strong>Cycle ${band.cycle} terms</strong><span class="badge b-green">Confirmed</span></div>
     <div class="grid-3">
       <div><div class="muted" style="font-size:11px">Cash issued</div><b>${KES(band.principal)}</b></div>
       <div><div class="muted" style="font-size:11px">Required savings</div><b>${KES(band.savings)}</b></div>
       <div><div class="muted" style="font-size:11px">Member savings</div><b style="color:${member&&savings>=band.savings?'var(--success)':'var(--text)'}">${KES(savings)}</b></div>
-      <div><div class="muted" style="font-size:11px">Interest</div><b>${KES(interest)} (${((interest/band.principal)*100).toFixed(2)}%)</b></div>
-      <div><div class="muted" style="font-size:11px">Insurance</div><b>${KES(band.insurance)}</b></div>
+      <div><div class="muted" style="font-size:11px">Interest</div><b>${KES(band.interest)} (${band.interestRate}%)</b></div>
+      <div><div class="muted" style="font-size:11px">Insurance (3.5% of P&amp;I)</div><b>${KES(band.insuranceFee)}</b></div>
+      <div><div class="muted" style="font-size:11px">${band.applicationFee?'Application fee':'Processing fee'}</div><b>${KES(band.applicationFee||band.processingFee)}</b></div>
       <div><div class="muted" style="font-size:11px">Weekly instalment</div><b>${KES(band.weekly)} x ${band.weeks}</b></div>
+      <div><div class="muted" style="font-size:11px">Total upfront deductions</div><b>${KES(band.insurance)}</b></div>
+      <div><div class="muted" style="font-size:11px">Net cash disbursed</div><b>${KES(band.netDisbursement)}</b></div>
     </div>`;
 }
 function loanActions(ev, id){
@@ -3939,7 +3947,7 @@ function showLoanSchedule(l){
  * ===================================================================== */
 function pageCalculator(){
   const cycle = Number(state._calcCycle || 1);
-  const bands = RHOSTINE_LOAN_BANDS.filter(b=>b.cycle===cycle);
+  const bands = RHOSTINE_LOAN_PRODUCTS.filter(b=>b.cycle===cycle);
   $('page').innerHTML = `
     <div class="page-head">
       <div><h1>Loan products</h1><div class="desc">Approved cash-loan bands, savings requirements and repayment terms.</div></div>
@@ -3949,76 +3957,38 @@ function pageCalculator(){
       <button class="${cycle===1?'active':''}" onclick="state._calcCycle=1;pageCalculator()">First cycle</button>
       <button class="${cycle===2?'active':''}" onclick="state._calcCycle=2;pageCalculator()">Second cycle</button>
     </div>
-    <div class="auth-info">Provisional schedule reconstructed from the supplied loan sheets. Yellow rows contain reconciled values that should be confirmed against the signed product schedule.</div>
+    <div class="auth-info">Confirmed weekly cash-loan schedule. Insurance and the applicable application or processing fee are deducted before disbursement.</div>
     <div class="table-wrap"><table class="tbl">
-      <thead><tr><th>Cycle</th><th class="num">Cash loan</th><th class="num">Required savings</th><th class="num">Weekly instalment</th><th class="num">Interest</th><th class="num">P&amp;I</th><th class="num">Insurance</th><th>Period</th><th>Status</th></tr></thead>
+      <thead><tr><th>Cycle</th><th class="num">Cash loan</th><th class="num">Required savings</th><th class="num">Weekly instalment</th><th class="num">Interest</th><th class="num">P&amp;I</th><th class="num">Insurance</th><th class="num">Other fee</th><th class="num">Upfront deductions</th><th class="num">Net disbursement</th><th>Period</th></tr></thead>
       <tbody>${bands.map(b=>{
-        const interest=b.totalPayable-b.principal;
-        return `<tr style="${b.source==='reconciled'?'background:var(--warning-50)':''}">
+        return `<tr>
           <td>Cycle ${b.cycle}</td><td class="num"><b>${KES(b.principal)}</b></td><td class="num">${KES(b.savings)}</td>
-          <td class="num">${KES(b.weekly)}</td><td class="num">${KES(interest)} (${((interest/b.principal)*100).toFixed(2)}%)</td>
-          <td class="num">${KES(b.totalPayable)}</td><td class="num">${KES(b.insurance)}</td><td>${b.weeks} weeks</td>
-          <td><span class="badge ${b.source==='sheet'?'b-blue':'b-yellow'}">${b.source==='sheet'?'Sheet':'Provisional'}</span></td></tr>`;
+          <td class="num">${KES(b.weekly)}</td><td class="num">${KES(b.interest)} (${b.interestRate}%)</td>
+          <td class="num">${KES(b.totalPayable)}</td><td class="num">${KES(b.insuranceFee)}</td><td class="num">${KES(b.applicationFee||b.processingFee)}</td>
+          <td class="num"><b>${KES(b.insurance)}</b></td><td class="num">${KES(b.netDisbursement)}</td><td>${b.months} months / ${b.weeks} weeks</td></tr>`;
       }).join('')}</tbody>
     </table></div>
     <div class="card card-pad" style="margin-top:14px">
-      <div style="font-weight:700;margin-bottom:8px">Working assumptions</div>
-      <div class="muted" style="font-size:12px;line-height:1.7">First cycle uses 24 weekly instalments. The KES 35,000 second-cycle product uses 36 weekly instalments; the remaining second-cycle products use 50. Insurance is recorded separately from principal and interest. A member must satisfy the savings requirement and complete Cycle 1 before receiving Cycle 2.</div>
+      <div style="font-weight:700;margin-bottom:8px">Confirmed lending policy</div>
+      <div class="muted" style="font-size:12px;line-height:1.7">KES 5,000-30,000: 18% over 25 weekly instalments, plus 3.5% insurance on principal and interest and a KES 500 application fee. KES 35,000: 20% over 36 weekly instalments with the same insurance and application fee. KES 40,000 and above: 18% over 25 weeks, 20% over 36 weeks, or 24% over 50 weeks; upfront deductions are 3.5% insurance on principal and interest plus a 1.5% processing fee. Savings for KES 70,000 and above are 33% of principal.</div>
     </div>
   `;
 }
-function updateWeeklyRateDisplay(val){
-  const monthlyPct = parseFloat(val) || 0;
-  const weeklyPct = monthlyPct / 4;
-  const exInterest = (weeklyPct / 100) * 10000;
-  const el = document.getElementById('weekly_rate_val');
-  const ex = document.getElementById('weekly_interest_ex');
-  if(el) el.textContent = weeklyPct.toFixed(4) + '%';
-  if(ex) ex.textContent = KES(exInterest);
-}
-
-function computeSchedule(principal, weekly, method, startDate){
-  const monthlyRate = Number(state.settings?.monthly_interest_rate || 2.5) / 100;
-  const weeklyRate = monthlyRate / 4;
-  const HARD_CAP = 156; // 3 years absolute max to prevent infinite loop / compounding bloat
-  const rows = [];
-  if(method === 'flat'){
-    // Company formula: totalInterest = principal * weeklyRate * (principal / weeklyInstallment)
-    // This derives the number of periods directly from principal/installment ratio.
-    let totalInterest = weekly > 0 ? principal * weeklyRate * (principal / weekly) : principal * weeklyRate * HARD_CAP;
-    let totalPayable = principal + totalInterest;
-    // Derive weeks from total payable, capped at HARD_CAP to prevent infinite loops
-    let weeks = weekly > 0 ? Math.min(HARD_CAP, Math.ceil(totalPayable / weekly)) : HARD_CAP;
-    if(!isFinite(weeks) || weeks < 1) weeks = HARD_CAP;
-    // Recompute with final week count
-    totalInterest = principal * weeklyRate * (principal / weekly);
-    totalPayable = principal + totalInterest;
-    const inst = totalPayable / weeks;
-    let bal = totalPayable;
-    const principalPerWk = principal / weeks;
-    const interestPerWk = totalInterest / weeks;
-    for(let w=1; w<=weeks; w++){
-      bal -= inst;
-      const due = new Date(startDate); due.setDate(due.getDate() + 7*w);
-      rows.push({ w, due, principal:principalPerWk, interest:interestPerWk, installment:inst, balance:Math.max(0,bal) });
-    }
-    return { weeks, totalInterest, totalPayable, suggestedWeekly: totalPayable/weeks, rows };
-  } else {
-    let bal = principal; let w = 0; let totalInterest = 0;
-    while(bal > 0.01 && w < HARD_CAP){
-      w++;
-      const interest = bal * weeklyRate;
-      const principalPart = Math.min(bal, Math.max(0, weekly - interest));
-      if(principalPart <= 0){ w = HARD_CAP; break; } // weekly too low to cover interest
-      const installment = principalPart + interest;
-      bal -= principalPart;
-      totalInterest += interest;
-      const due = new Date(startDate); due.setDate(due.getDate() + 7*w);
-      rows.push({ w, due, principal:principalPart, interest, installment, balance:Math.max(0,bal) });
-    }
-    const totalPayable = principal + totalInterest;
-    return { weeks: w, totalInterest, totalPayable, suggestedWeekly: totalPayable/Math.max(1,w), rows };
-  }
+function computeSchedule(loan){
+  const principal=Number(loan.loan_value)||0;
+  const totalPayable=Number(loan.total_payable)||principal;
+  const totalInterest=Number(loan.interest_amount)||(totalPayable-principal);
+  const weeks=Number(loan.term_weeks)||1;
+  const weekly=Number(loan.weekly_installment)||(totalPayable/weeks);
+  const principalPart=principal/weeks, interestPart=totalInterest/weeks;
+  let balance=totalPayable;
+  const rows=Array.from({length:weeks},(_,idx)=>{
+    const due=new Date(loan.start_date); due.setDate(due.getDate()+7*(idx+1));
+    const installment=idx===weeks-1?balance:Math.min(weekly,balance);
+    balance=Math.max(0,balance-installment);
+    return {w:idx+1,due,principal:principalPart,interest:interestPart,installment,balance};
+  });
+  return {weeks,totalInterest,totalPayable,suggestedWeekly:weekly,rows};
 }
 
 /* =====================================================================
@@ -4242,11 +4212,23 @@ function pageSettings(){
           <div class="field"><label>M-Pesa Paybill number</label><input name="paybill_number" value="${s.paybill_number||''}" /></div>
           <div class="field"><label>M-Pesa account number</label><input name="paybill_account" value="${s.paybill_account||''}" /></div>
           <div class="field"><label>Registration fee (KES)</label><input type="number" min="0" name="registration_fee" value="${s.registration_fee||200}" /></div>
-          <div class="field"><label>Maximum loan term (weeks)</label><input type="number" min="1" max="52" name="max_loan_weeks" value="${s.max_loan_weeks||52}" /></div>
+          <div class="field"><label>Maximum loan term (weeks)</label><input type="number" name="max_loan_weeks" value="50" readonly /></div>
         </div>
-        <div class="auth-info">Interest, savings, insurance and instalment amounts are controlled by the Cycle 1 and Cycle 2 loan-product schedule.</div>
+        <div class="auth-info">The confirmed lending policy below controls every new loan, the loan calculator, instalments, deductions and repayment schedules.</div>
         <button class="btn btn-primary" type="submit">Save settings</button>
       </form>
+    </div>
+
+    <div class="card card-pad" style="max-width:720px;margin-top:20px">
+      <div class="card-head" style="padding:0 0 14px 0;border:none"><h3 style="margin:0">Confirmed loan policy</h3></div>
+      <div class="table-wrap"><table class="tbl">
+        <thead><tr><th>Loan amount</th><th>Term</th><th>Interest</th><th>Upfront deductions</th><th>Savings</th></tr></thead>
+        <tbody>
+          <tr><td>KES 5,000-30,000</td><td>25 weeks</td><td>18%</td><td>3.5% of P&amp;I + KES 500 application fee</td><td>Approved schedule</td></tr>
+          <tr><td>KES 35,000</td><td>36 weeks</td><td>20%</td><td>3.5% of P&amp;I + KES 500 application fee</td><td>KES 9,000</td></tr>
+          <tr><td>KES 40,000 and above</td><td>25 / 36 / 50 weeks</td><td>18% / 20% / 24%</td><td>3.5% of P&amp;I + 1.5% of principal</td><td>33% from KES 70,000</td></tr>
+        </tbody>
+      </table></div>
     </div>
 
     <div class="card card-pad" style="max-width:720px;margin-top:20px">
@@ -6270,7 +6252,7 @@ function downloadDemandLetter(loanId){
   <div class="muted">Reference: ${escapeHtml(letterNo)}</div>
   <p><b>To:</b><br>${escapeHtml(mem.full_name || 'Client')}<br>ID No: ${escapeHtml(mem.national_id || 'Not provided')}<br>Phone: ${escapeHtml(mem.phone || 'Not provided')}<br>Group: ${escapeHtml(group.name || 'Not provided')}</p>
   <div class="title">14-Day Demand Letter</div>
-  <p>We refer to the asset loan issued to you by ${escapeHtml(businessName)}. Our records show that the loan below has an outstanding balance that requires your urgent attention.</p>
+  <p>We refer to the cash loan issued to you by ${escapeHtml(businessName)}. Our records show that the loan below has an outstanding balance that requires your urgent attention.</p>
   <table>
     <tr><th>Loan product</th><td>${escapeHtml(loanLabel(loan))}</td></tr>
     <tr><th>Loan start date</th><td>${fmtDate(loan.start_date)}</td></tr>
@@ -6462,15 +6444,23 @@ function loadLocalPreview(){
     {id:'member-b',business_id:businessId,group_id:groupA.id,full_name:'Mary Atieno',national_id:'RLG-1002',phone:'0712 000 102',registered_on:addDaysISO(todayISO(),-150),status:'active'},
     {id:'member-c',business_id:businessId,group_id:groupB.id,full_name:'Lucy Njeri',national_id:'RLG-1003',phone:'0712 000 103',registered_on:addDaysISO(todayISO(),-120),status:'active'}
   ];
+  const previewLoan=(id,memberId,groupId,product,startDays)=>({
+    id,business_id:businessId,member_id:memberId,group_id:groupId,officer_id:officerId,
+    product_name:`Cycle ${product.cycle} Cash Loan - ${product.months} Months`,loan_cycle:product.cycle,
+    loan_value:product.principal,required_savings:product.savings,insurance_amount:product.insurance,
+    interest_amount:product.interest,interest_rate:product.interestRate,weekly_installment:product.weekly,
+    total_payable:product.totalPayable,term_weeks:product.weeks,net_disbursement:product.netDisbursement,
+    start_date:addDaysISO(todayISO(),startDays),expected_end_date:addDaysISO(todayISO(),startDays+product.weeks*7),status:'active',terms_source:'confirmed'
+  });
   const loans=[
-    {id:'loan-a',business_id:businessId,member_id:'member-a',group_id:groupA.id,officer_id:officerId,product_name:'Cycle 1 Cash Loan',loan_cycle:1,loan_value:25000,required_savings:5000,insurance_amount:1413,interest_amount:3320,interest_rate:13.28,weekly_installment:1180,total_payable:28320,term_weeks:24,net_disbursement:25000,start_date:addDaysISO(todayISO(),-28),expected_end_date:addDaysISO(todayISO(),140),status:'active',terms_source:'sheet'},
-    {id:'loan-b',business_id:businessId,member_id:'member-c',group_id:groupB.id,officer_id:officerId,product_name:'Cycle 2 Cash Loan',loan_cycle:2,loan_value:50000,required_savings:12500,insurance_amount:2920,interest_amount:12000,interest_rate:24,weekly_installment:1240,total_payable:62000,term_weeks:50,net_disbursement:50000,start_date:addDaysISO(todayISO(),-14),expected_end_date:addDaysISO(todayISO(),336),status:'active',terms_source:'sheet'}
+    previewLoan('loan-a','member-a',groupA.id,loanProduct('25000-6'),-28),
+    previewLoan('loan-b','member-c',groupB.id,loanProduct('50000-12'),-14)
   ];
   state.preview=true;
   state.session={user:{id:'preview-user',email:'preview@rhostine.local'}};
   state.staff={id:adminId,business_id:businessId,auth_user_id:'preview-user',full_name:'Rhostine Administrator',email:'preview@rhostine.local',role:'admin',status:'active'};
   state.perms={can_manage_groups:true,can_manage_members:true,can_record_savings:true,can_record_repayments:true,can_issue_loans:true,can_view_reports:true,can_manage_staff:true};
-  state.settings={id:'biz_'+businessId,business_id:businessId,business_name:'Rhostine Limited Groups',registration_fee:200,savings_threshold:1600,max_loan_weeks:52,receipt_footer:'Together We Rise'};
+  state.settings={id:'biz_'+businessId,business_id:businessId,business_name:'Rhostine Limited Groups',registration_fee:200,savings_threshold:1600,max_loan_weeks:50,receipt_footer:'Together We Rise'};
   state.billing={status:'paid',paid:true,locked:false,reminder:false,pending:false};
   state.data.groups=[groupA,groupB]; state.data.members=members; state.data.guarantors=[];
   state.data.staff=[state.staff,{id:officerId,business_id:businessId,full_name:'Grace Mwikali',email:'officer@rhostine.local',role:'officer',status:'active'}];
@@ -6481,7 +6471,7 @@ function loadLocalPreview(){
     {id:'saving-c',business_id:businessId,member_id:'member-c',group_id:groupB.id,meeting_date:addDaysISO(todayISO(),-3),amount:15000,type:'savings',status:'approved',recorded_by:officerId}
   ];
   state.data.repayments=[
-    {id:'rep-a',business_id:businessId,loan_id:'loan-a',member_id:'member-a',group_id:groupA.id,meeting_date:addDaysISO(todayISO(),-7),amount:1180,principal:1041.67,interest:138.33,status:'approved',recorded_by:officerId},
+    {id:'rep-a',business_id:businessId,loan_id:'loan-a',member_id:'member-a',group_id:groupA.id,meeting_date:addDaysISO(todayISO(),-7),amount:1180,principal:1000,interest:180,status:'approved',recorded_by:officerId},
     {id:'rep-b',business_id:businessId,loan_id:'loan-b',member_id:'member-c',group_id:groupB.id,meeting_date:addDaysISO(todayISO(),-7),amount:1240,principal:1000,interest:240,status:'approved',recorded_by:officerId}
   ];
   state.data.meetings=[]; state.data.reconciliations=[]; state.data.expenses=[]; state.data.audit=[]; state.data.mpesaTransactions=[];

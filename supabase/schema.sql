@@ -43,7 +43,7 @@ create table if not exists public.rh_settings (
   receipt_footer text default 'Together We Rise',
   registration_fee numeric(14,2) not null default 200,
   savings_threshold numeric(14,2) not null default 1600,
-  max_loan_weeks integer not null default 52,
+  max_loan_weeks integer not null default 50,
   paybill_number text,
   paybill_account text,
   mpesa_environment text default 'sandbox',
