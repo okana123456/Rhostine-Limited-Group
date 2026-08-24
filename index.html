@@ -4267,14 +4267,8 @@ function pageSettings(){
           <div class="helper">Use Sandbox while testing with Safaricom's test credentials. Switch to Production only once everything works and Safaricom has approved your go-live request.</div>
         </div>
 
-        <div class="grid-2">
-          <div class="field"><label>Daraja Consumer Key</label><input name="mpesa_consumer_key" value="${s.mpesa_consumer_key||''}" autocomplete="off" placeholder="From Daraja portal app" /></div>
-          <div class="field"><label>Daraja Consumer Secret</label><input type="password" name="mpesa_consumer_secret" value="${s.mpesa_consumer_secret||''}" autocomplete="off" placeholder="From Daraja portal app" /></div>
-        </div>
-        <div class="grid-2">
-          <div class="field"><label>Paybill Shortcode</label><input name="mpesa_shortcode" value="${s.mpesa_shortcode||s.paybill_number||''}" placeholder="e.g. 600000" /></div>
-          <div class="field"><label>Lipa Na M-Pesa Passkey</label><input type="password" name="mpesa_passkey" value="${s.mpesa_passkey||''}" autocomplete="off" placeholder="Used for STK Push (optional)" /></div>
-        </div>
+        <div class="field"><label>Paybill Shortcode</label><input name="mpesa_shortcode" value="${s.mpesa_shortcode||s.paybill_number||''}" placeholder="e.g. 600000" /></div>
+        <div class="auth-info">Daraja credentials are stored as protected Supabase Edge Function secrets and are never sent to this browser.</div>
 
         <div class="field">
           <label>Callback URL <span class="muted" style="font-weight:400">(auto-generated - give this to Safaricom)</span></label>
@@ -4289,7 +4283,7 @@ function pageSettings(){
           </div>
         </div>
 
-        <button class="btn btn-primary" type="submit">Save M-Pesa settings</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-primary" type="submit">Save M-Pesa settings</button><button class="btn btn-outline" type="button" id="register-mpesa-urls">Register callback URLs</button></div>
       </form>
     </div>
   `;
@@ -4314,7 +4308,7 @@ function pageSettings(){
     const fd = new FormData(e.target); const row = Object.fromEntries(fd);
     // Always (re)save the auto-generated callback URL too, so the edge function
     // and the dashboard always show the same value
-    row.mpesa_callback_url = callbackUrl;
+    row.collections_callback_url = callbackUrl;
     const settingsId = state.staff?.business_id ? ('biz_' + state.staff.business_id) : 'main';
     const { error } = await sb.from('rh_settings').upsert({ id: settingsId,...row });
     if(error) return toast(error.message,'error');
@@ -4322,6 +4316,14 @@ function pageSettings(){
     lsSet('settings', state.settings);
     audit('update_mpesa_settings','rh_settings', settingsId, null, { mpesa_environment: row.mpesa_environment, mpesa_shortcode: row.mpesa_shortcode });
     toast('M-Pesa settings saved','success');
+  });
+  $('register-mpesa-urls').addEventListener('click', async e => {
+    const btn = e.currentTarget;
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Registering';
+    const { data, error } = await sb.functions.invoke('collections-register-urls');
+    btn.disabled = false; btn.textContent = 'Register callback URLs';
+    if(error || !data?.ok) return toast(data?.error || error?.message || 'Callback registration failed.','error');
+    toast(data.message || 'M-Pesa callback URLs registered.','success');
   });
 }
 function copyCallbackUrl(){
