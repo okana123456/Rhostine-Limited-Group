@@ -1,0 +1,22 @@
+{
+  "project_ref": "kqgxwbdenjehwppuliqs",
+  "project_name": "Rhostine Limited",
+  "audited_at": "2026-08-24T12:37:16.092054+03:00",
+  "database_name": "postgres",
+  "audit_user": "supabase_read_only_user",
+  "public_tables": [],
+  "public_policies": [],
+  "public_routines": [],
+  "public_financial_records": 0,
+  "platform_backup_status": {
+    "walg_enabled": true,
+    "pitr_enabled": false,
+    "available_restore_points": 0
+  },
+  "rollback_plan": {
+    "script": "supabase/rollback.sql",
+    "scope": "Rhostine rh_ tables and functions only",
+    "guard": "Stops if operational Rhostine records exist",
+    "recovery_note": "The audited public schema was empty before installation. Run rollback.sql only while the installation remains unpopulated."
+  }
+}
