@@ -578,7 +578,11 @@ async function signIn(email, password){
   const { data, error } = await sb.auth.signInWithPassword({ email, password });
   if(error) return { ok:false, error: error.message };
   state.session = data.session;
-  const ok = await loadStaff();
+  let ok = await loadStaff();
+  if(!ok){
+    const provision = await provisionBusinessAdmin(data.session);
+    if(provision.ok) ok = await loadStaff();
+  }
   if(!ok){
     await sb.auth.signOut();
     state.session = null;
@@ -608,6 +612,27 @@ async function loadStaff(){
   return true;
 }
 
+async function provisionBusinessAdmin(session, details={}){
+  const user = session?.user;
+  const meta = user?.user_metadata || {};
+  const businessName = (details.businessName || meta.business_name || '').trim();
+  const adminName = (details.adminName || meta.full_name || '').trim();
+  const email = (details.email || user?.email || '').trim().toLowerCase();
+  const key = (details.key || meta.registration_key || '').trim();
+  if(!user?.id || !businessName || !adminName || !email || !key) return { ok:false, incomplete:true };
+
+  const { error } = await sb.rpc('rh_register_business_admin', {
+    p_auth_user_id: user.id,
+    p_business_name: businessName,
+    p_admin_name: adminName,
+    p_admin_email: email,
+    p_registration_key: key
+  });
+  if(error) return { ok:false, error:error.message };
+  if(meta.registration_key) await sb.auth.updateUser({ data:{ registration_key:null } });
+  return { ok:true };
+}
+
 /* =====================================================================
  * BUSINESS REGISTRATION (signup with master key)
  * ===================================================================== */
@@ -618,8 +643,10 @@ async function registerBusiness({ businessName, adminName, email, password, key 
   if(!navigator.onLine) return { ok:false, error:'An internet connection is required to register a new business.' };
   email = email.trim().toLowerCase();
 
-  let userId = null;
   let session = null;
+
+  // A previous login must never supply the identity for a new registration.
+  await sb.auth.signOut({ scope:'local' });
 
   // 1. Create the authentication user. If a previous attempt already created
   //    the auth account, sign in and complete the missing staff provisioning.
@@ -627,7 +654,7 @@ async function registerBusiness({ businessName, adminName, email, password, key 
     email, password,
     options: {
       emailRedirectTo: authRedirectUrl(),
-      data: { full_name: adminName, business_name: businessName }
+      data: { full_name: adminName, business_name: businessName, registration_key:key }
     }
   });
 
@@ -638,29 +665,34 @@ async function registerBusiness({ businessName, adminName, email, password, key 
       if(loginErr){
         return { ok:false, error:'This email already has an authentication account. If you have already received the confirmation email, click Confirm email first, then return here and press Register business again with the same email, password and registration key.' };
       }
-      userId = loginData.user?.id || loginData.session?.user?.id;
       session = loginData.session || null;
     } else {
       return { ok:false, error: msg };
     }
   } else {
-    userId = authData.user?.id;
     session = authData.session || null;
+    // Existing emails may return a placeholder user without an error. Never
+    // use that ID for provisioning; authenticate the actual account instead.
+    if(!session && authData.user && Array.isArray(authData.user.identities) && authData.user.identities.length===0){
+      const { data: loginData, error: loginErr } = await sb.auth.signInWithPassword({ email, password });
+      if(loginErr){
+        const awaitingConfirmation = /confirm|verified/i.test(loginErr.message||'');
+        return { ok:false, error:awaitingConfirmation
+          ? 'This account was created but its email is not confirmed yet. Open the Supabase confirmation email, confirm the address, then return and register again with the same details.'
+          : 'This email already has an account. Use its existing password or choose Forgot password.' };
+      }
+      session = loginData.session || null;
+    }
   }
 
-  if(!userId) return { ok:false, error:'Authentication account could not be created.' };
+  if(!authData?.user && !session) return { ok:false, error:'Authentication account could not be created.' };
 
-  // 2. Provision business, admin staff registry, permissions and settings in one
-  //    server-side database call, so email confirmation cannot leave the account
-  //    without a matching staff registry row.
-  const { error: provisionErr } = await sb.rpc('rh_register_business_admin', {
-    p_auth_user_id: userId,
-    p_business_name: businessName,
-    p_admin_name: adminName,
-    p_admin_email: email,
-    p_registration_key: key
-  });
-  if(provisionErr) return { ok:false, error:'Business provisioning failed: ' + provisionErr.message };
+  // Email-confirmation projects do not issue a session at signup. Provisioning
+  // must wait because the database only accepts the authenticated user's ID.
+  if(!session) return { ok:true, requiresEmailConfirmation:true };
+
+  const provision = await provisionBusinessAdmin(session, {businessName,adminName,email,key});
+  if(!provision.ok) return { ok:false, error:'Business provisioning failed: ' + (provision.error || 'Registration details are incomplete.') };
 
   if(session){
     state.session = session;
@@ -1454,9 +1486,13 @@ function renderAuth(){
       } else if(res.signedIn){
         toast('Business registered and signed in successfully.', 'success');
       } else {
-        $('auth-msg').innerHTML = `<div class="auth-info">Business registered successfully. ${res.requiresEmailConfirmation ? 'A confirmation email has been sent to the administrator address. Please confirm the email, then return here to sign in.' : 'You may now sign in.'}</div>`;
+        $('auth-msg').innerHTML = `<div class="auth-info">${res.requiresEmailConfirmation ? 'Your authentication account has been created. Open the confirmation email sent by Supabase and confirm the address. After confirmation, return here and register again with the same details to complete the business setup.' : 'Business registered successfully. You may now sign in.'}</div>`;
         e.target.reset();
-        setTimeout(()=>{ authMode='signin'; renderAuth(); }, 1200);
+        if(res.requiresEmailConfirmation){
+          btn.disabled = false; btn.innerHTML = 'Register business';
+        } else {
+          setTimeout(()=>{ authMode='signin'; renderAuth(); }, 1800);
+        }
       }
     });
   }
@@ -6487,7 +6523,11 @@ function loadLocalPreview(){
   const { data } = await sb.auth.getSession();
   if(data.session){
     state.session = data.session;
-    const ok = await loadStaff();
+    let ok = await loadStaff();
+    if(!ok){
+      const provision = await provisionBusinessAdmin(data.session);
+      if(provision.ok) ok = await loadStaff();
+    }
     if(!ok){ await sb.auth.signOut(); state.session=null; render(); return; }
     await loadSettings();
     await loadBillingStatus({ silent:true });
