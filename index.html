@@ -580,7 +580,9 @@ async function signIn(email, password){
   state.session = data.session;
   let ok = await loadStaff();
   if(!ok){
-    const provision = await provisionBusinessAdmin(data.session);
+    const meta = data.session?.user?.user_metadata || {};
+    const pendingDetails = meta.business_name && meta.full_name ? { key:meta.registration_key || BUSINESS_REGISTRATION_KEY } : {};
+    const provision = await provisionBusinessAdmin(data.session, pendingDetails);
     if(provision.ok) ok = await loadStaff();
   }
   if(!ok){
@@ -629,7 +631,7 @@ async function provisionBusinessAdmin(session, details={}){
     p_registration_key: key
   });
   if(error) return { ok:false, error:error.message };
-  if(meta.registration_key) await sb.auth.updateUser({ data:{ registration_key:null } });
+  await sb.auth.updateUser({ data:{ registration_key:null, pending_business_registration:false } });
   return { ok:true };
 }
 
@@ -654,7 +656,7 @@ async function registerBusiness({ businessName, adminName, email, password, key 
     email, password,
     options: {
       emailRedirectTo: authRedirectUrl(),
-      data: { full_name: adminName, business_name: businessName, registration_key:key }
+      data: { full_name: adminName, business_name: businessName, registration_key:key, pending_business_registration:true }
     }
   });
 
@@ -678,7 +680,7 @@ async function registerBusiness({ businessName, adminName, email, password, key 
       if(loginErr){
         const awaitingConfirmation = /confirm|verified/i.test(loginErr.message||'');
         return { ok:false, error:awaitingConfirmation
-          ? 'This account was created but its email is not confirmed yet. Open the Supabase confirmation email, confirm the address, then return and register again with the same details.'
+          ? 'This account was created but its email is not confirmed yet. Open the Supabase confirmation email and confirm the address; the confirmation link will return you to the sign-in page.'
           : 'This email already has an account. Use its existing password or choose Forgot password.' };
       }
       session = loginData.session || null;
@@ -1357,8 +1359,11 @@ function render(){
  * AUTH SCREEN
  * ===================================================================== */
 let authMode = 'signin'; // signin | forgot | register | update_password
+let authNotice = '';
 function renderAuth(){
   const app = $('app');
+  const notice = authNotice;
+  authNotice = '';
   const subtitles = {
     signin: 'Sign in to continue.',
     forgot: 'Enter your registered email to receive a password reset link.',
@@ -1376,7 +1381,7 @@ function renderAuth(){
           </div>
         </div>
         <div class="auth-sub">${subtitles[authMode]}</div>
-        <div id="auth-msg"></div>
+        <div id="auth-msg">${notice ? `<div class="auth-info">${notice}</div>` : ''}</div>
         ${authMode === 'signin' ? `
           <form id="form-signin">
             <div class="field"><label>Email address</label><input type="email" name="email" required autocomplete="username" /></div>
@@ -1486,7 +1491,7 @@ function renderAuth(){
       } else if(res.signedIn){
         toast('Business registered and signed in successfully.', 'success');
       } else {
-        $('auth-msg').innerHTML = `<div class="auth-info">${res.requiresEmailConfirmation ? 'Your authentication account has been created. Open the confirmation email sent by Supabase and confirm the address. After confirmation, return here and register again with the same details to complete the business setup.' : 'Business registered successfully. You may now sign in.'}</div>`;
+        $('auth-msg').innerHTML = `<div class="auth-info">${res.requiresEmailConfirmation ? 'Registration received. Open the confirmation email sent by Supabase and confirm the address. The confirmation link will bring you back here to sign in.' : 'Business registered successfully. You may now sign in.'}</div>`;
         e.target.reset();
         if(res.requiresEmailConfirmation){
           btn.disabled = false; btn.innerHTML = 'Register business';
@@ -6524,11 +6529,25 @@ function loadLocalPreview(){
   if(data.session){
     state.session = data.session;
     let ok = await loadStaff();
+    let completedRegistration = false;
     if(!ok){
-      const provision = await provisionBusinessAdmin(data.session);
-      if(provision.ok) ok = await loadStaff();
+      const meta = data.session.user?.user_metadata || {};
+      const looksLikeRegistration = !!(meta.business_name && meta.full_name);
+      const provision = await provisionBusinessAdmin(data.session, looksLikeRegistration ? {key:meta.registration_key || BUSINESS_REGISTRATION_KEY} : {});
+      if(provision.ok){
+        ok = await loadStaff();
+        completedRegistration = ok;
+      }
     }
     if(!ok){ await sb.auth.signOut(); state.session=null; render(); return; }
+    if(completedRegistration){
+      await sb.auth.signOut();
+      state.session=null; state.staff=null; state.perms=null;
+      authMode='signin';
+      authNotice='Email confirmed and business registration completed. Sign in with your administrator email and password.';
+      renderAuth();
+      return;
+    }
     await loadSettings();
     await loadBillingStatus({ silent:true });
     if(isSubscriptionLocked()){ render(); return; }
