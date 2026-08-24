@@ -1758,6 +1758,7 @@ function closeActMenu(){ $('actmenu-root').innerHTML = ''; }
  * PAGE: DASHBOARD
  * ===================================================================== */
 let _dashFilter = 'today';
+let _dashTab = 'overview';
 let _dashCustomStart = '', _dashCustomEnd = '';
 let _expectedCollectionDate = '';
 let _arrearsFilter = 'all'; // date range filter for arrears page and dashboard
@@ -1826,6 +1827,7 @@ function arrearDateRange(){
 function pageDashboard(){
   const isAdmin = state.staff.role === 'admin';
   if(!isAdmin){ pageOfficerDashboard(); return; }
+  if(!['overview','collections','portfolio','officers'].includes(_dashTab)) _dashTab='overview';
 
   const { start, end } = dashDateRange();
   // Robust inRange: compare date strings directly (YYYY-MM-DD), with a fallback
@@ -1898,6 +1900,11 @@ function pageDashboard(){
       </div>
     </div>
 
+    <div class="tabs" style="margin-bottom:18px">
+      ${[['overview','Overview'],['collections','Collections'],['portfolio','Loan Portfolio'],['officers','Officers']].map(([k,label])=>`<button class="${_dashTab===k?'active':''}" onclick="_dashTab='${k}';pageDashboard()">${label}</button>`).join('')}
+    </div>
+
+    ${_dashTab==='overview'?`
       <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
       <div class="kpi k-warn"><div class="l">New members</div><div class="v">${newMembers.length}</div><div class="d">registered in selected period</div></div>
       <div class="kpi k-primary"><div class="l">Loans disbursed</div><div class="v">${disbursedLoans.length}</div><div class="d">${KES(disbursedValue)} issued</div></div>
@@ -1912,8 +1919,11 @@ function pageDashboard(){
     </div>
 
     ${renderCollectionPanel(collection,expectedDate)}
+    `:''}
 
+    ${(_dashTab==='overview'||_dashTab==='collections')?`
     <div style="display:flex;flex-direction:column;gap:16px;margin-top:4px">
+      ${_dashTab==='overview'?`
       <div class="card" style="min-width:0">
         <div class="card-head"><h3>Recent savings</h3><div class="sub">${savings.length} entries</div></div>
         <div style="overflow-x:auto">
@@ -1929,6 +1939,9 @@ function pageDashboard(){
           </table>
         </div>
       </div>
+      `:''}
+      ${_dashTab==='collections'?`
+      ${renderCollectionPanel(collection,expectedDate)}
       <div class="card" style="min-width:0">
         <div class="card-head" style="flex-wrap:wrap;gap:8px">
           <h3>Due & In Arrears</h3>
@@ -1955,9 +1968,27 @@ function pageDashboard(){
           </table>
         </div>
       </div>
+      `:''}
     </div>
+    `:''}
 
-    ${officerPerf.length ? `
+    ${_dashTab==='portfolio'?`
+      <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(190px,1fr))">
+        <div class="kpi k-primary"><div class="l">Loans disbursed</div><div class="v">${disbursedLoans.length}</div><div class="d">${KES(disbursedValue)} in selected period</div></div>
+        <div class="kpi"><div class="l">Active loan book</div><div class="v">${activeLoans.length}</div><div class="d">${KES(activeLoans.reduce((sum,l)=>sum+Number(l.loan_value||0),0))} principal issued</div></div>
+        <div class="kpi k-danger"><div class="l">Outstanding balance</div><div class="v">${KES(outstandingBal)}</div><div class="d">principal and interest remaining</div></div>
+        <div class="kpi ${attentionLoans.length?'k-warn':'k-success'}"><div class="l">Loans needing attention</div><div class="v">${attentionLoans.length}</div><div class="d">arrears or defaults</div></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Active loan portfolio</h3><button class="btn btn-sm btn-outline" onclick="go('loans')">Open loan register</button></div>
+        <div style="overflow-x:auto"><table class="tbl">
+          <thead><tr><th>Member</th><th>Loan product</th><th class="num">Cash issued</th><th class="num">Paid</th><th class="num">Outstanding</th><th class="num">Arrears</th><th>Status</th></tr></thead>
+          <tbody>${activeLoans.slice(0,12).map(l=>{const m=state.data.members.find(x=>x.id===l.member_id);const arrears=loanArrearsAsOf(l,expectedDate);return `<tr><td><b>${m?.full_name||' - '}</b></td><td>${loanLabel(l)}</td><td class="num">${KES(l.loan_value)}</td><td class="num">${KES(loanPaid(l.id))}</td><td class="num">${KES(loanOutstanding(l))}</td><td class="num" style="color:${arrears>0?'var(--danger)':'inherit'}">${KES(arrears)}</td><td><span class="badge ${arrears>0?'b-red':'b-green'}">${arrears>0?'Needs attention':'On track'}</span></td></tr>`}).join('')||`<tr><td colspan="7"><div class="empty"><h4>No active loans</h4></div></td></tr>`}</tbody>
+        </table></div>
+      </div>
+    `:''}
+
+    ${_dashTab==='officers'&&officerPerf.length ? `
     <div class="card" style="margin-top:16px">
       <div class="card-head"><h3>Officer loan portfolio</h3><div class="sub">Current active loan book by officer</div></div>
       <div style="overflow-x:auto">
@@ -1992,7 +2023,7 @@ function pageDashboard(){
           </tbody>
         </table>
       </div>
-    </div>` : ''}\n  `;
+    </div>` : _dashTab==='officers'?`<div class="empty"><h4>No active loan officers</h4><p>Add officers in Staff &amp; Permissions to see performance here.</p></div>`:''}\n  `;
 
   // Populate the Due & Arrears mini-table after innerHTML is set
   dashArrFilter();
@@ -2070,6 +2101,7 @@ function dashArrFilter(){
 }
 
 function pageOfficerDashboard(){
+  if(!['overview','collections','portfolio','groups'].includes(_dashTab)) _dashTab='overview';
   const me = state.staff;
   const myGroups = state.data.groups.filter(g=>g.officer_id===me.id);
   const myMembers = state.data.members.filter(m=>myGroups.some(g=>g.id===m.group_id));
@@ -2122,6 +2154,10 @@ function pageOfficerDashboard(){
         <input type="date" value="${expectedDate}" style="padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text)" onchange="_expectedCollectionDate=this.value;pageDashboard()" />
       </div>
     </div>
+    <div class="tabs" style="margin-bottom:18px">
+      ${[['overview','Overview'],['collections','Collections'],['portfolio','Portfolio'],['groups','Groups']].map(([k,label])=>`<button class="${_dashTab===k?'active':''}" onclick="_dashTab='${k}';pageDashboard()">${label}</button>`).join('')}
+    </div>
+    ${_dashTab==='overview'?`
     <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
       <div class="kpi k-warn"><div class="l">New members</div><div class="v">${myNewMembers.length}</div><div class="d">registered in my groups</div></div>
       <div class="kpi k-primary"><div class="l">Loans disbursed</div><div class="v">${myDisbursedLoans.length}</div><div class="d">${KES(myDisbursedValue)} issued</div></div>
@@ -2141,6 +2177,18 @@ function pageOfficerDashboard(){
       </div>` : ''}
     </div>
     ${renderCollectionPanel(myCollection,expectedDate,'My collection performance')}
+    `:''}
+    ${_dashTab==='collections'?`
+      ${renderCollectionPanel(myCollection,expectedDate,'My collection performance')}
+      <div class="card">
+        <div class="card-head"><h3>Collections requiring action</h3><div class="sub">Due or in arrears as at ${fmtDate(expectedDate)}</div></div>
+        <div style="overflow-x:auto"><table class="tbl">
+          <thead><tr><th>Member</th><th>Loan product</th><th>Next due</th><th class="num">Expected</th><th class="num">Arrears</th><th>Status</th></tr></thead>
+          <tbody>${myLoans.filter(l=>loanExpectedCollectionOnDate(l,expectedDate)>0||loanArrearsAsOf(l,expectedDate)>0).map(l=>{const mem=state.data.members.find(x=>x.id===l.member_id);const expected=loanExpectedCollectionOnDate(l,expectedDate);const arrears=loanArrearsAsOf(l,expectedDate);return `<tr><td><b>${mem?.full_name||' - '}</b></td><td>${loanLabel(l)}</td><td>${fmtDate(loanNextDueDate(l,expectedDate))}</td><td class="num">${expected?KES(expected):' - '}</td><td class="num" style="color:${arrears>0?'var(--danger)':'inherit'}">${KES(arrears)}</td><td><span class="badge ${arrears>0?'b-red':'b-yellow'}">${arrears>0?'In arrears':'Due'}</span></td></tr>`}).join('')||`<tr><td colspan="6"><div class="empty"><h4>No collections need action</h4></div></td></tr>`}</tbody>
+        </table></div>
+      </div>
+    `:''}
+    ${_dashTab==='groups'?`
     <div class="card" style="margin-top:16px">
       <div class="card-head"><h3>My groups</h3><div class="sub">Savings &amp; repayments today = ${todayStr}</div></div>
       <div style="overflow-x:auto"><table class="tbl">
@@ -2170,6 +2218,14 @@ function pageOfficerDashboard(){
         </tbody>
       </table></div>
     </div>
+    `:''}
+    ${_dashTab==='portfolio'?`
+    <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(190px,1fr))">
+      <div class="kpi k-primary"><div class="l">Loans disbursed</div><div class="v">${myDisbursedLoans.length}</div><div class="d">${KES(myDisbursedValue)} in selected period</div></div>
+      <div class="kpi k-warn"><div class="l">Active loans</div><div class="v">${myLoans.length}</div><div class="d">under my portfolio</div></div>
+      <div class="kpi k-danger"><div class="l">Outstanding balance</div><div class="v">${KES(myOutstandingBal)}</div><div class="d">principal and interest remaining</div></div>
+      <div class="kpi ${myAttentionLoans.length?'k-warn':'k-success'}"><div class="l">Loans needing attention</div><div class="v">${myAttentionLoans.length}</div><div class="d">arrears or defaults</div></div>
+    </div>
     <div class="card" style="margin-top:16px">
       <div class="card-head"><h3>My Active Loans</h3><div class="sub">${myLoans.length} active loans</div></div>
       <div style="overflow-x:auto"><table class="tbl">
@@ -2192,6 +2248,7 @@ function pageOfficerDashboard(){
         </tbody>
       </table></div>
     </div>
+    `:''}
   `;
 }
 
