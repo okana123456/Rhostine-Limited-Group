@@ -569,12 +569,14 @@ function loanLabel(loan){
 /* ----- Money formatter ----- */
 const KES = n => 'KES ' + (Number(n||0)).toLocaleString('en-KE', { minimumFractionDigits:0, maximumFractionDigits:2 });
 const fmtDate = d => d ? new Date(d).toLocaleDateString('en-KE', { day:'2-digit', month:'short', year:'numeric' }) : ' - ';
-const todayISO = () => new Date().toISOString().slice(0,10);
+const todayISO = () => localDateISO(new Date());
 const addDaysISO = (isoDate, days) => {
-  const d = new Date(isoDate || todayISO());
+  const d = localDateFromISO(isoDate || todayISO()) || new Date();
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0,10);
+  return localDateISO(d);
 };
+const addWeeksISO = (isoDate, weeks) => addDaysISO(isoDate, weeks * 7);
+const isFutureISODate = isoDate => !!isoDate && isoDate > todayISO();
 const escapeHtml = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 /* ----- M-Pesa group code generator -----
@@ -2483,7 +2485,7 @@ function openGroupForm(g=null){
         </div>
         <div class="field"><label>Meeting time</label><input type="time" name="meeting_time" value="${g?.meeting_time||'14:00'}" /></div>
       </div>
-      <div class="field"><label>Meeting location</label><input name="meeting_location" value="${g?.meeting_location||''}" placeholder="Venue / address" /></div>
+      <div class="field"><label>Meeting location</label><input name="location" value="${g?.location||''}" placeholder="Venue / address" /></div>
       <div class="grid-2">
         <div class="field"><label>Chairman name</label><input name="chairman_name" value="${g?.chairman_name||''}" /></div>
         <div class="field"><label>Chairman phone</label><input name="chairman_phone" value="${g?.chairman_phone||''}" /></div>
@@ -3991,7 +3993,7 @@ function openCashLoan(){
         <div class="field"><label>Loan band</label><select id="cl-band" required onchange="cashLoanPreview()">${bandOptions}</select></div>
       </div>
       <div class="grid-2">
-        <div class="field"><label>Disbursement date</label><input id="cl-start" type="date" value="${todayISO()}" required onchange="cashLoanPreview()" /></div>
+        <div class="field"><label>Loan taken date</label><input id="cl-start" type="date" value="${todayISO()}" max="${todayISO()}" required onchange="cashLoanPreview()" /><div class="helper">Use the actual date the loan was taken. Future dates are blocked.</div></div>
         <div class="field"><label>Payment frequency</label><input value="Weekly" disabled /></div>
       </div>
       <div id="cl-preview" class="card card-pad" style="background:var(--surface-2);box-shadow:none"></div>
@@ -4011,7 +4013,9 @@ function openCashLoan(){
         const savings = memberSavings(member.id);
         if(savings < band.savings) return toast(`Savings are below the required ${KES(band.savings)}.`, 'error');
         const startDate = $('cl-start').value;
-        const end = new Date(startDate); end.setDate(end.getDate() + (band.weeks * 7));
+        if(!startDate) return toast('Enter the date the loan was taken.', 'error');
+        if(isFutureISODate(startDate)) return toast('Loan taken date cannot be in the future.', 'error');
+        const expectedEnd = addWeeksISO(startDate, band.weeks);
         const group = state.data.groups.find(g=>g.id===member.group_id);
         const loan = {
           business_id:state.staff.business_id||null,
@@ -4022,7 +4026,7 @@ function openCashLoan(){
           interest_rate:band.interestRate,
           weekly_installment:band.weekly, total_payable:band.totalPayable, term_weeks:band.weeks,
           net_disbursement:Number(band.netDisbursement.toFixed(2)), start_date:startDate,
-          expected_end_date:end.toISOString().slice(0,10), status:'active', terms_source:'confirmed'
+          expected_end_date:expectedEnd, status:'active', terms_source:'confirmed'
         };
         const {data,error}=await sb.from('rh_loans').insert(loan).select().single();
         if(error) return toast('Loan could not be issued: '+error.message,'error');
@@ -4038,11 +4042,16 @@ function cashLoanPreview(){
   const member=state.data.members.find(m=>m.id===$('cl-member')?.value);
   const band=loanProduct($('cl-band')?.value||'5000-6'); if(!band) return;
   const savings=member?memberSavings(member.id):0;
+  const startDate = $('cl-start')?.value || todayISO();
+  const expectedEnd = isFutureISODate(startDate) ? null : addWeeksISO(startDate, band.weeks);
   out.innerHTML=`<div style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:10px"><strong>Cycle ${band.cycle} terms</strong><span class="badge b-green">Confirmed</span></div>
+    ${isFutureISODate(startDate) ? `<div class="auth-error">Loan taken date cannot be in the future.</div>` : ''}
     <div class="grid-3">
       <div><div class="muted" style="font-size:11px">Cash issued</div><b>${KES(band.principal)}</b></div>
       <div><div class="muted" style="font-size:11px">Required savings</div><b>${KES(band.savings)}</b></div>
       <div><div class="muted" style="font-size:11px">Member savings</div><b style="color:${member&&savings>=band.savings?'var(--success)':'var(--text)'}">${KES(savings)}</b></div>
+      <div><div class="muted" style="font-size:11px">Loan taken date</div><b>${fmtDate(startDate)}</b></div>
+      <div><div class="muted" style="font-size:11px">Expected end date</div><b>${expectedEnd ? fmtDate(expectedEnd) : ' - '}</b></div>
       <div><div class="muted" style="font-size:11px">Interest</div><b>${KES(band.interest)} (${band.interestRate}%)</b></div>
       <div><div class="muted" style="font-size:11px">Insurance (3.5% of P&amp;I)</div><b>${KES(band.insuranceFee)}</b></div>
       <div><div class="muted" style="font-size:11px">${band.applicationFee?'Application fee':'Processing fee'}</div><b>${KES(band.applicationFee||band.processingFee)}</b></div>
@@ -5448,11 +5457,12 @@ function mpAllocTypeChanged(){
 }
 async function markMpesaTxnAllocated(txnId, table, recordId){
   const { error } = await sb.from('rh_mpesa_transactions').update({
-    status: 'allocated', allocated_table: table, allocated_id: recordId,
-    allocated_by: state.staff.id, allocated_at: new Date().toISOString()
+    allocation_status: 'allocated',
+    allocated_table: table,
+    allocated_id: recordId
   }).eq('id', txnId);
   const t = state.data.mpesaTransactions.find(x=>x.id===txnId);
-  if(t && !error){ t.status='allocated'; t.allocated_table=table; t.allocated_id=recordId; }
+  if(t && !error){ t.allocation_status='allocated'; t.allocated_table=table; t.allocated_id=recordId; }
   return error || null;
 }
 
@@ -6574,13 +6584,12 @@ function openEditSaving(savingId){
 
         const oldAmount = sv.amount;
         const { error } = await sb.from('rh_savings')
-          .update({ amount, edit_notes: reason })
+          .update({ amount })
           .eq('id', savingId);
 
         if(error) return toast(error.message, 'error');
 
         sv.amount = amount;
-        sv.edit_notes = reason;
         audit('edit_saving', 'rh_savings', savingId, { amount: oldAmount }, { amount, edit_notes: reason });
         closeModal();
         render();
@@ -6643,7 +6652,7 @@ function openEditRepayment(repaymentId){
         const oldAmount = rep.amount;
 
         const { error } = await sb.from('rh_repayments')
-          .update({ amount, principal, interest, edit_notes: reason })
+          .update({ amount, principal, interest })
           .eq('id', repaymentId);
 
         if(error) return toast(error.message, 'error');
@@ -6651,7 +6660,6 @@ function openEditRepayment(repaymentId){
         rep.amount = amount;
         rep.principal = principal;
         rep.interest = interest;
-        rep.edit_notes = reason;
         audit('edit_repayment', 'rh_repayments', repaymentId, { amount: oldAmount }, { amount, principal, interest, edit_notes: reason });
         closeModal();
         render();
