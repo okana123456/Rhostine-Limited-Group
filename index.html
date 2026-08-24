@@ -516,7 +516,7 @@ const state = {
   settings: null,
   view: 'dashboard',
   data: {
-    groups: [], members: [], guarantors: [], staff: [], loans: [],
+    groups: [], members: [], guarantors: [], staff: [], loans: [], loanApplications: [],
     savings: [], repayments: [], meetings: [], reconciliations: [], expenses: [], audit: [],
     mpesaTransactions: []
   },
@@ -815,8 +815,8 @@ async function smartLoadAll(){
     }
   }
   state.loading = true; render();
-  const tables = ['rh_groups','rh_members','rh_guarantors','rh_staff','rh_loans','rh_savings','rh_repayments','rh_meetings','rh_reconciliations','rh_expenses','rh_mpesa_transactions'];
-  const map = { rh_groups:'groups', rh_members:'members', rh_guarantors:'guarantors', rh_staff:'staff', rh_loans:'loans', rh_savings:'savings', rh_repayments:'repayments', rh_meetings:'meetings', rh_reconciliations:'reconciliations', rh_expenses:'expenses', rh_mpesa_transactions:'mpesaTransactions' };
+  const tables = ['rh_groups','rh_members','rh_guarantors','rh_staff','rh_loans','rh_loan_applications','rh_savings','rh_repayments','rh_meetings','rh_reconciliations','rh_expenses','rh_mpesa_transactions'];
+  const map = { rh_groups:'groups', rh_members:'members', rh_guarantors:'guarantors', rh_staff:'staff', rh_loans:'loans', rh_loan_applications:'loanApplications', rh_savings:'savings', rh_repayments:'repayments', rh_meetings:'meetings', rh_reconciliations:'reconciliations', rh_expenses:'expenses', rh_mpesa_transactions:'mpesaTransactions' };
   const results = await Promise.all(tables.map(t => {
     let query = sb.from(t).select('*').limit(5000);
     if (state.staff && state.staff.business_id) {
@@ -884,14 +884,14 @@ function setupRealtime(){
         return;
       }
       const tbl = payload.table;
-      const map = { rh_groups:'groups', rh_members:'members', rh_guarantors:'guarantors', rh_loans:'loans', rh_savings:'savings', rh_repayments:'repayments', rh_meetings:'meetings', rh_staff:'staff', rh_reconciliations:'reconciliations', rh_expenses:'expenses', rh_mpesa_transactions:'mpesaTransactions' };
+      const map = { rh_groups:'groups', rh_members:'members', rh_guarantors:'guarantors', rh_loans:'loans', rh_loan_applications:'loanApplications', rh_savings:'savings', rh_repayments:'repayments', rh_meetings:'meetings', rh_staff:'staff', rh_reconciliations:'reconciliations', rh_expenses:'expenses', rh_mpesa_transactions:'mpesaTransactions' };
       const key = map[tbl]; if(!key) return;
       const arr = state.data[key];
       if(payload.eventType === 'INSERT'){ if(!arr.find(x=>x.id===payload.new.id)) arr.unshift(payload.new); }
       else if(payload.eventType === 'UPDATE'){ const i = arr.findIndex(x=>x.id===payload.new.id); if(i>=0) arr[i] = payload.new; }
       else if(payload.eventType === 'DELETE'){ const i = arr.findIndex(x=>x.id===payload.old.id); if(i>=0) arr.splice(i,1); }
       lsSet(key, arr);
-      if(['dashboard','members','groups','meeting','loans','mpesaPayments'].includes(state.view)) render();
+      if(['dashboard','members','groups','meeting','loanApplications','loans','mpesaPayments'].includes(state.view)) render();
     })
     .subscribe();
 }
@@ -914,7 +914,7 @@ async function audit(action, entity=null, entity_id=null, oldV=null, newV=null){
 function memberSavings(memberId){
   // Registration payments do not inflate the regular savings balance.
   return state.data.savings
-    .filter(s => s.member_id === memberId && s.status !== 'pending' && (!s.type || s.type === 'savings'))
+    .filter(s => s.member_id === memberId && s.status === 'approved' && (!s.type || s.type === 'savings'))
     .reduce((a,b) => a + Number(b.amount||0), 0);
 }
 function memberRegPaid(memberId){
@@ -1656,7 +1656,8 @@ function navItems(){
     { k:'dashboard', label:'Dashboard', show:true, icon:dashIcon() },
     { k:'groups', label:'Groups', show:true, icon:groupsIcon() },
     { k:'members', label:'Members', show:true, icon:memberIcon() },
-    { k:'meeting', label:'Meeting Recorder', show:isAdmin, icon:meetingIcon() },
+    { k:'meeting', label:'Meeting Recorder', show:true, icon:meetingIcon() },
+    { k:'loanApplications', label:'Loan Applications', show:true, icon:applicationIcon() },
     { k:'savings', label:'Savings', show:true, icon:savingsIcon() },
     { k:'repayments', label:'Repayments', show:true, icon:repaymentsIcon() },
     { k:'loans', label:'Active Loans', show:true, icon:loanIcon() },
@@ -1726,10 +1727,8 @@ function renderShell(){
         <nav class="bottom-nav">
           <a class="${state.view==='dashboard'?'active':''}" onclick="go('dashboard')">${dashIcon()}<span>Home</span></a>
           <a class="${state.view==='groups'||state.view==='members'?'active':''}" onclick="go('${primary.find(p=>p.k==='groups')?'groups':'members'}')">${groupsIcon()}<span>Groups</span></a>
-          ${state.staff.role==='admin'
-            ? `<a class="${state.view==='meeting'?'active':''}" onclick="go('meeting')">${meetingIcon()}<span>Meeting</span></a>`
-            : `<a class="${state.view==='repayments'?'active':''}" onclick="go('repayments')">${repaymentsIcon()}<span>Payments</span></a>`}
-          <a class="${state.view==='loans'?'active':''}" onclick="go('loans')">${loanIcon()}<span>Loans</span></a>
+          <a class="${state.view==='meeting'?'active':''}" onclick="go('meeting')">${meetingIcon()}<span>Meeting</span></a>
+          <a class="${state.view==='loanApplications'||state.view==='loans'?'active':''}" onclick="go('loanApplications')">${applicationIcon()}<span>Loans</span></a>
         </nav>
       </div>
     </div>`;
@@ -1737,7 +1736,7 @@ function renderShell(){
 }
 function pageTitle(){
   return ({
-    dashboard:'Dashboard', groups:'Groups', members:'Members', meeting:'Meeting Recorder',
+    dashboard:'Dashboard', groups:'Groups', members:'Members', meeting:'Meeting Recorder', loanApplications:'Loan Applications',
     savings:'Savings', repayments:'Repayments',
     loans:'Active Loans', calculator:'Loan Products',
     reconciliation:'Remittances', expenses:'Expenses', reports:'Reports', accounting:'Accounting',
@@ -1746,11 +1745,6 @@ function pageTitle(){
   })[state.view] || ' - ';
 }
 function go(view, ctx=null){
-  if(view === 'meeting' && state.staff?.role !== 'admin'){
-    view = 'loans';
-    ctx = null;
-    toast('Officers should record payments from Active Loans.', 'info');
-  }
   state.view = view; state.viewCtx = ctx; toggleSidebar(false); render();
 }
 function toggleSidebar(force){
@@ -1761,13 +1755,9 @@ function toggleSidebar(force){
 }
 
 function renderPage(){
-  if(state.view === 'meeting' && state.staff?.role !== 'admin'){
-    state.view = 'loans';
-    state.viewCtx = null;
-  }
   const fns = {
     dashboard: pageDashboard, groups: pageGroups, members: pageMembers,
-    meeting: pageMeeting, savings: pageSavings, repayments: pageRepayments,
+    meeting: pageMeeting, loanApplications: pageLoanApplications, savings: pageSavings, repayments: pageRepayments,
     loans: pageLoans, arrears: pageArrears, calculator: pageCalculator,
     reconciliation: pageReconciliation, mpesaPayments: pageMpesaPayments, expenses: pageExpenses, reports: pageReports, accounting: pageAccounting,
     staff: pageStaff, settings: pageSettings, audit: pageAudit,
@@ -1798,6 +1788,7 @@ function accountingIcon(){ return ic('<path d="M2 20h20M5 20V8l7-6 7 6v12"/><pat
 function expensesIcon(){ return ic('<rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/><path d="M7 15h2m4 0h4"/>'); }
 function savingsIcon(){ return ic('<rect x="2" y="8" width="20" height="12" rx="2"/><path d="M6 8V6a4 4 0 0 1 8 0v2"/><circle cx="12" cy="14" r="2"/>'); }
 function repaymentsIcon(){ return ic('<path d="M12 2v20M2 12l4-4 4 4"/><path d="M22 12l-4 4-4-4"/><path d="M6 16H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2"/>'); }
+function applicationIcon(){ return ic('<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>'); }
 function refreshIcon(){ return ic('<path d="M21 12a9 9 0 0 1-15.18 6.36"/><path d="M3 12a9 9 0 0 1 15.18-6.36"/><path d="M21 4v6h-6"/><path d="M3 20v-6h6"/>'); }
 function themeIcon(){ return ic('<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>'); }
 function switchIcon(){ return ic('<polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>'); }
@@ -3295,7 +3286,7 @@ function pageMeeting(){
 
   $('page').innerHTML = `
     <div class="page-head">
-      <div><h1>Weekly meeting recorder</h1><div class="desc">Capture savings and loan repayments per member for a single meeting session.</div></div>
+      <div><h1>Weekly meeting recorder</h1><div class="desc">Capture savings, repayments and new loan applications for a single meeting session.</div></div>
     </div>
 
     <div class="card card-pad">
@@ -3311,7 +3302,7 @@ function pageMeeting(){
           </div>
           ${selectedGroup ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px"> Meets: <b>${selectedGroup.meeting_day||' - '}</b>${selectedGroup.meeting_time?' at '+selectedGroup.meeting_time:''} - Code: <b>${selectedGroup.group_code||' - '}</b></div>` : ''}
         </div>
-        <div class="field"><label>Meeting date</label><input id="m-date" type="date" value="${m.date}" /></div>
+        <div class="field"><label>Meeting date</label><input id="m-date" type="date" value="${m.date}" max="${todayISO()}" /></div>
       </div>
     </div>
 
@@ -3319,7 +3310,14 @@ function pageMeeting(){
   `;
 
   // Wire up meeting date
-  $('m-date').addEventListener('change', e => { m.date = e.target.value; });
+  $('m-date').addEventListener('change', e => {
+    if(isFutureISODate(e.target.value)){
+      e.target.value = todayISO();
+      toast('Meeting date cannot be in the future.','error');
+    }
+    m.date = e.target.value;
+    renderMeetList();
+  });
 
   // Group live search - sorted chronologically (already sorted in myGroups)
   const meetGrpSearch = $('meet-grp-search');
@@ -3355,6 +3353,7 @@ function renderMeetList(){
   const host = $('meet-list');
   if(!m.groupId){ host.innerHTML = `<div class="card card-pad empty"><h4>Select a group</h4><p>Choose a group to load its members for the meeting session.</p></div>`; return; }
   const members = state.data.members.filter(x=>x.group_id===m.groupId && (!x.status || x.status==='active'));
+  const canApplyForLoans = state.staff.role==='admin' || state.perms?.can_issue_loans===true;
   if(!members.length){ host.innerHTML = `<div class="card card-pad empty"><h4>No active members</h4><p>Register members to this group before recording a meeting.</p></div>`; return; }
 
   // Pre-compute registration fee total per member
@@ -3367,10 +3366,11 @@ function renderMeetList(){
         <button class="btn btn-primary" onclick="submitMeeting()"> Submit meeting</button>
       </div>
       <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-        <table class="tbl" style="min-width:700px;font-size:13px">
+        <table class="tbl" style="min-width:900px;font-size:13px">
           <thead>
             <tr style="white-space:nowrap">
               <th style="min-width:140px;position:sticky;left:0;background:var(--surface);z-index:2">Member</th>
+              <th style="min-width:170px">Loan application</th>
               <th class="num" style="min-width:110px">Savings (KES)</th>
               <th style="min-width:200px">Loan Repayment(s)</th>
               <th class="num" style="min-width:120px">
@@ -3384,6 +3384,7 @@ function renderMeetList(){
             ${members.map(mem => {
               const sv = memberSavings(mem.id);
               const lns = state.data.loans.filter(l => l.member_id === mem.id && l.status === 'active');
+              const openApplication = state.data.loanApplications.find(a => a.member_id === mem.id && ['pending','approved'].includes(a.status));
               const ent = m.entries[mem.id] = m.entries[mem.id] || { savings:'', reg_installment:'', repayments:{}, absent:false, notes:'' };
               lns.forEach(ln => {
                 if(ent.repayments[ln.id] === undefined){
@@ -3400,6 +3401,15 @@ function renderMeetList(){
                 <td style="position:sticky;left:0;background:var(--surface);z-index:1">
                   <div style="font-weight:600;font-size:12px;line-height:1.3">${mem.full_name}</div>
                   <div style="font-size:10px;color:var(--text-muted);margin-top:1px">Sav: ${KES(sv)}${lns.length?` - ${lns.length} loan(s)`:''}</div>
+                </td>
+                <td>
+                  ${lns.length
+                    ? `<span class="badge b-blue">Active loan</span>`
+                    : openApplication
+                      ? `<button class="btn btn-sm btn-outline" onclick="openLoanApplicationDetails('${openApplication.id}')">${applicationStatusMeta(openApplication.status).label}</button>`
+                      : canApplyForLoans
+                        ? `<button class="btn btn-sm btn-outline" onclick="openMeetingLoanApplication('${mem.id}')">Apply for loan</button>`
+                        : `<span class="muted" style="font-size:11px">Not permitted</span>`}
                 </td>
                 <td>
                   <input type="number" min="0" inputmode="numeric" class="meet-input" data-id="${mem.id}" data-f="savings"
@@ -3433,7 +3443,7 @@ function renderMeetList(){
         </table>
       </div>
       <div style="padding:10px 14px;font-size:11px;color:var(--text-muted);border-top:1px solid var(--border)">
-        Tip:  Tip: Scroll right to see all columns. Tap a number field and use your keypad to enter amounts.
+        Scroll right to see all columns. Tap a number field and use your keypad to enter amounts.
       </div>
     </div>
   `;
@@ -3538,6 +3548,299 @@ async function submitMeeting(){
   toast(`Meeting saved - ${parts.join(', ')}.${fail?' Failed: '+fail:''}`, fail?'warn':'success');
   state._meet = { groupId:'', date: todayISO(), entries:{} };
   render();
+}
+
+/* =====================================================================
+ * PAGE: LOAN APPLICATIONS
+ * ===================================================================== */
+function applicationStatusMeta(status){
+  return ({
+    pending:{label:'Pending review',badge:'b-yellow',step:'Step 1 of 3'},
+    approved:{label:'Approved',badge:'b-green',step:'Step 2 of 3'},
+    disbursed:{label:'Disbursed',badge:'b-blue',step:'Step 3 of 3'},
+    rejected:{label:'Rejected',badge:'b-red',step:'Closed'}
+  })[status] || {label:status||'Unknown',badge:'b-grey',step:' - '};
+}
+
+function applicationOtherFeeLabel(app){
+  return Number(app.loan_value)<=35000 ? 'Application fee' : 'Processing fee';
+}
+
+function applicationTermsHtml(app, member=null){
+  const currentSavings = member ? memberSavings(member.id) : Number(app.savings_at_application||0);
+  const enoughSavings = currentSavings >= Number(app.required_savings||0);
+  return `<div class="grid-3">
+    <div><div class="muted" style="font-size:11px">Cash requested</div><b>${KES(app.loan_value)}</b></div>
+    <div><div class="muted" style="font-size:11px">Approved savings</div><b style="color:${enoughSavings?'var(--success)':'var(--danger)'}">${KES(currentSavings)}</b></div>
+    <div><div class="muted" style="font-size:11px">Required savings</div><b>${KES(app.required_savings)}</b></div>
+    <div><div class="muted" style="font-size:11px">Interest</div><b>${KES(app.interest_amount)} (${Number(app.interest_rate)}%)</b></div>
+    <div><div class="muted" style="font-size:11px">Principal + interest</div><b>${KES(app.total_payable)}</b></div>
+    <div><div class="muted" style="font-size:11px">Weekly instalment</div><b>${KES(app.weekly_installment)} x ${app.term_weeks}</b></div>
+    <div><div class="muted" style="font-size:11px">Insurance (3.5% of P&amp;I)</div><b>${KES(app.insurance_fee)}</b></div>
+    <div><div class="muted" style="font-size:11px">${applicationOtherFeeLabel(app)}</div><b>${KES(app.other_fee)}</b></div>
+    <div><div class="muted" style="font-size:11px">Upfront deductions</div><b>${KES(app.upfront_deductions)}</b></div>
+    <div><div class="muted" style="font-size:11px">Net cash on disbursement</div><b>${KES(app.net_disbursement)}</b></div>
+    <div><div class="muted" style="font-size:11px">Application date</div><b>${fmtDate(app.application_date)}</b></div>
+    <div><div class="muted" style="font-size:11px">Term</div><b>${app.term_months} months / ${app.term_weeks} weeks</b></div>
+  </div>`;
+}
+
+async function refreshLoanWorkflowData(){
+  if(state.preview) return;
+  const businessId = state.staff.business_id;
+  const [appsResult,loansResult,meetingsResult] = await Promise.all([
+    sb.from('rh_loan_applications').select('*').eq('business_id',businessId).order('created_at',{ascending:false}).limit(5000),
+    sb.from('rh_loans').select('*').eq('business_id',businessId).limit(5000),
+    sb.from('rh_meetings').select('*').eq('business_id',businessId).limit(5000)
+  ]);
+  const firstError = appsResult.error || loansResult.error || meetingsResult.error;
+  if(firstError) throw firstError;
+  state.data.loanApplications = appsResult.data || [];
+  state.data.loans = loansResult.data || [];
+  state.data.meetings = meetingsResult.data || [];
+  lsSet('loanApplications',state.data.loanApplications);
+  lsSet('loans',state.data.loans);
+  lsSet('meetings',state.data.meetings);
+}
+
+function openMeetingLoanApplication(memberId){
+  if(state.staff.role!=='admin' && state.perms?.can_issue_loans!==true) return toast('You do not have permission to submit loan applications.','error');
+  const meeting = state._meet;
+  const member = state.data.members.find(x=>x.id===memberId);
+  const group = state.data.groups.find(x=>x.id===meeting?.groupId);
+  if(!member || !group || !meeting?.date) return toast('Select a group and meeting date first.','error');
+  if(isFutureISODate(meeting.date)) return toast('Loan applications cannot be recorded in the future.','error');
+  if(state.data.loans.some(l=>l.member_id===member.id && l.status==='active')) return toast('This member already has an active loan.','error');
+  if(state.data.loanApplications.some(a=>a.member_id===member.id && ['pending','approved'].includes(a.status))) return toast('This member already has an open loan application.','error');
+
+  const completedLoans = state.data.loans.filter(l=>l.member_id===member.id && l.status==='completed').length;
+  const products = RHOSTINE_LOAN_PRODUCTS.filter(p=>p.cycle===1 || completedLoans>0);
+  modal({
+    title:'New loan application',size:'lg',
+    body:`<form id="loan-application-form" data-member-id="${member.id}">
+      <div class="auth-info" style="margin-bottom:14px"><b>${escapeHtml(member.full_name)}</b> - ${escapeHtml(group.name)} - Meeting ${fmtDate(meeting.date)}</div>
+      <div class="grid-2">
+        <div class="field"><label>Loan product</label><select id="la-product" required onchange="loanApplicationPreview()">
+          ${products.map(p=>`<option value="${p.id}">Cycle ${p.cycle} - ${KES(p.principal)} - ${p.months} months</option>`).join('')}
+        </select></div>
+        <div class="field"><label>Application date</label><input value="${meeting.date}" disabled /></div>
+      </div>
+      <div class="field"><label>Officer notes</label><textarea id="la-notes" rows="3" placeholder="Purpose of the loan or meeting remarks"></textarea></div>
+      <div id="loan-application-preview" style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px"></div>
+    </form>`,
+    actions:[
+      {label:'Cancel',onClick:closeModal},
+      {label:'Submit application',cls:'btn-primary',onClick:async()=>{
+        const form=$('loan-application-form');
+        if(!form.reportValidity()) return;
+        const band=loanProduct($('la-product').value);
+        if(!band) return toast('Select a valid loan product.','error');
+        const notes=$('la-notes').value.trim();
+        try{
+          if(state.preview){
+            const app={
+              id:'application-'+Date.now(),business_id:state.staff.business_id,member_id:member.id,
+              group_id:group.id,meeting_id:null,officer_id:state.staff.id,product_id:band.id,
+              product_name:`Cycle ${band.cycle} Cash Loan - ${band.months} Months`,loan_cycle:band.cycle,
+              loan_value:band.principal,term_months:band.months,term_weeks:band.weeks,
+              interest_rate:band.interestRate,interest_amount:band.interest,total_payable:band.totalPayable,
+              weekly_installment:band.weekly,required_savings:band.savings,savings_at_application:memberSavings(member.id),
+              completed_loans_at_application:completedLoans,insurance_fee:band.insuranceFee,
+              other_fee:band.applicationFee||band.processingFee,upfront_deductions:band.insurance,
+              net_disbursement:band.netDisbursement,application_date:meeting.date,notes,status:'pending',
+              created_at:new Date().toISOString(),updated_at:new Date().toISOString()
+            };
+            state.data.loanApplications.unshift(app);
+          }else{
+            if(!(await ensureFreshToken())) return;
+            const {error}=await sb.rpc('rh_submit_loan_application',{
+              p_member_id:member.id,p_group_id:group.id,p_application_date:meeting.date,
+              p_product_id:band.id,p_notes:notes||null
+            });
+            if(error) throw error;
+            await refreshLoanWorkflowData();
+          }
+          closeModal();
+          renderMeetList();
+          toast('Loan application submitted for administrator review.','success');
+        }catch(error){ toast('Application could not be submitted: '+error.message,'error'); }
+      }}
+    ]
+  });
+  loanApplicationPreview();
+}
+
+function loanApplicationPreview(){
+  const host=$('loan-application-preview');
+  const band=loanProduct($('la-product')?.value);
+  if(!host||!band) return;
+  const member=state.data.members.find(m=>m.id===$('loan-application-form')?.dataset.memberId);
+  const savings=member?memberSavings(member.id):0;
+  const eligible=savings>=band.savings;
+  host.innerHTML=`
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:12px">
+      <strong>Cycle ${band.cycle} terms</strong>
+      <span class="badge ${eligible?'b-green':'b-yellow'}">${eligible?'Savings ready':'Savings pending'}</span>
+    </div>
+    ${applicationTermsHtml({
+      loan_value:band.principal,required_savings:band.savings,interest_amount:band.interest,
+      interest_rate:band.interestRate,total_payable:band.totalPayable,weekly_installment:band.weekly,
+      insurance_fee:band.insuranceFee,other_fee:band.applicationFee||band.processingFee,
+      upfront_deductions:band.insurance,net_disbursement:band.netDisbursement,
+      application_date:state._meet?.date,term_months:band.months,term_weeks:band.weeks
+    },member)}
+    <div class="helper" style="margin-top:10px">The administrator will recheck approved savings, loan history and these terms before approval.</div>`;
+}
+
+function pageLoanApplications(){
+  const isAdmin=state.staff.role==='admin';
+  const all=(state.data.loanApplications||[])
+    .filter(a=>isAdmin||a.officer_id===state.staff.id)
+    .slice().sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
+  const tab=state._loanApplicationTab||'pending';
+  const list=all.filter(a=>tab==='all'||a.status===tab);
+  const counts=Object.fromEntries(['pending','approved','disbursed','rejected'].map(s=>[s,all.filter(a=>a.status===s).length]));
+  $('page').innerHTML=`
+    <div class="page-head">
+      <div><h1>Loan applications</h1><div class="desc">${isAdmin?'Review, approve and disburse applications submitted during group meetings.':'Track applications submitted from your group meetings.'}</div></div>
+      <div class="actions"><button class="btn btn-outline" onclick="go('meeting')">${meetingIcon()} Open meeting recorder</button></div>
+    </div>
+    <div class="kpis">
+      <div class="kpi k-warn"><div class="l">Pending review</div><div class="v">${counts.pending}</div><div class="d">Waiting for an administrator</div></div>
+      <div class="kpi k-success"><div class="l">Approved</div><div class="v">${counts.approved}</div><div class="d">Ready for disbursement</div></div>
+      <div class="kpi k-primary"><div class="l">Disbursed</div><div class="v">${counts.disbursed}</div><div class="d">Active loans created</div></div>
+      <div class="kpi"><div class="l">Rejected</div><div class="v">${counts.rejected}</div><div class="d">Closed with a reason</div></div>
+    </div>
+    <div class="tabs">
+      ${[['pending','Pending'],['approved','Approved'],['disbursed','Disbursed'],['rejected','Rejected'],['all','All']].map(([key,label])=>`<button class="${tab===key?'active':''}" onclick="state._loanApplicationTab='${key}';pageLoanApplications()">${label} (${key==='all'?all.length:counts[key]})</button>`).join('')}
+    </div>
+    <div class="table-wrap"><table class="tbl">
+      <thead><tr><th>Member</th><th>Group</th><th>Loan product</th><th>Applied</th>${isAdmin?'<th>Officer</th>':''}<th class="num">Savings / Required</th><th class="num">Net cash</th><th>Status</th><th>Progress</th><th></th></tr></thead>
+      <tbody>${list.map(app=>{
+        const member=state.data.members.find(m=>m.id===app.member_id);
+        const group=state.data.groups.find(g=>g.id===app.group_id);
+        const officer=state.data.staff.find(s=>s.id===app.officer_id);
+        const meta=applicationStatusMeta(app.status);
+        const currentSavings=memberSavings(app.member_id);
+        return `<tr>
+          <td><b>${escapeHtml(member?.full_name||'Unknown member')}</b></td>
+          <td>${escapeHtml(group?.name||' - ')}</td>
+          <td>${escapeHtml(app.product_name)}</td>
+          <td>${fmtDate(app.application_date)}</td>
+          ${isAdmin?`<td>${escapeHtml(officer?.full_name||' - ')}</td>`:''}
+          <td class="num"><span style="color:${currentSavings>=Number(app.required_savings)?'var(--success)':'var(--danger)'}">${KES(currentSavings)}</span> / ${KES(app.required_savings)}</td>
+          <td class="num"><b>${KES(app.net_disbursement)}</b></td>
+          <td><span class="badge ${meta.badge}">${meta.label}</span></td>
+          <td>${meta.step}</td>
+          <td><button class="btn btn-sm ${isAdmin&&app.status==='pending'?'btn-primary':'btn-outline'}" onclick="openLoanApplicationDetails('${app.id}')">${isAdmin&&app.status==='pending'?'Review':isAdmin&&app.status==='approved'?'Disburse':'View'}</button></td>
+        </tr>`;
+      }).join('')||`<tr><td colspan="${isAdmin?10:9}"><div class="empty"><h4>No ${tab==='all'?'loan applications':tab+' applications'}</h4><p>Applications are created from the Meeting Recorder beside each member.</p></div></td></tr>`}</tbody>
+    </table></div>`;
+}
+
+function openLoanApplicationDetails(applicationId){
+  const app=state.data.loanApplications.find(a=>a.id===applicationId);
+  if(!app) return toast('Loan application not found. Refresh the system and try again.','error');
+  const member=state.data.members.find(m=>m.id===app.member_id);
+  const group=state.data.groups.find(g=>g.id===app.group_id);
+  const officer=state.data.staff.find(s=>s.id===app.officer_id);
+  const reviewer=state.data.staff.find(s=>s.id===app.reviewed_by);
+  const meta=applicationStatusMeta(app.status);
+  const isAdmin=state.staff.role==='admin';
+  const actions=[{label:'Close',onClick:closeModal}];
+  if(isAdmin&&['pending','approved'].includes(app.status)) actions.push({label:'Reject',cls:'btn-danger',onClick:()=>openRejectLoanApplication(app.id)});
+  if(isAdmin&&app.status==='pending') actions.push({label:'Approve application',cls:'btn-primary',onClick:()=>confirmApproveLoanApplication(app.id)});
+  if(isAdmin&&app.status==='approved') actions.push({label:'Disburse loan',cls:'btn-primary',onClick:()=>openDisburseLoanApplication(app.id)});
+  modal({title:'Loan application details',size:'lg',body:`
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-bottom:14px">
+      <div><h3 style="margin:0 0 4px">${escapeHtml(member?.full_name||'Unknown member')}</h3><div class="muted">${escapeHtml(group?.name||' - ')} - Submitted by ${escapeHtml(officer?.full_name||' - ')}</div></div>
+      <div style="text-align:right"><span class="badge ${meta.badge}">${meta.label}</span><div class="muted" style="font-size:11px;margin-top:4px">${meta.step}</div></div>
+    </div>
+    <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px">${applicationTermsHtml(app,member)}</div>
+    ${app.notes?`<div style="margin-top:14px"><div class="muted" style="font-size:11px">Officer notes</div><div>${escapeHtml(app.notes)}</div></div>`:''}
+    ${app.reviewed_at?`<div style="margin-top:14px"><div class="muted" style="font-size:11px">Reviewed by</div><div>${escapeHtml(reviewer?.full_name||'Administrator')} - ${fmtDate(app.reviewed_at)}</div></div>`:''}
+    ${app.rejection_reason?`<div class="auth-error" style="margin-top:14px"><b>Rejection reason:</b> ${escapeHtml(app.rejection_reason)}</div>`:''}
+    ${app.status==='approved'?`<div class="auth-info" style="margin-top:14px">Approval does not create a debt. The active loan is created only when an administrator confirms disbursement.</div>`:''}
+  `,actions});
+}
+
+function confirmApproveLoanApplication(applicationId){
+  const app=state.data.loanApplications.find(a=>a.id===applicationId);
+  const member=state.data.members.find(m=>m.id===app?.member_id);
+  confirmDialog(`Approve the ${KES(app?.loan_value)} application for <b>${escapeHtml(member?.full_name||'this member')}</b>? Savings and cycle eligibility will be checked again.`,()=>reviewLoanApplication(applicationId,'approve'),{title:'Approve loan application'});
+}
+
+async function reviewLoanApplication(applicationId,action,reason=null){
+  const app=state.data.loanApplications.find(a=>a.id===applicationId);
+  if(!app) return;
+  try{
+    if(state.preview){
+      if(action==='approve'){
+        if(memberSavings(app.member_id)<Number(app.required_savings)) throw new Error('Approved savings are below the required amount');
+        app.status='approved'; app.reviewed_by=state.staff.id; app.reviewed_at=new Date().toISOString(); app.rejection_reason=null;
+      }else{
+        app.status='rejected'; app.reviewed_by=state.staff.id; app.reviewed_at=new Date().toISOString(); app.rejection_reason=reason;
+      }
+    }else{
+      if(!(await ensureFreshToken())) return;
+      const {error}=await sb.rpc('rh_review_loan_application',{p_application_id:applicationId,p_action:action,p_reason:reason});
+      if(error) throw error;
+      await refreshLoanWorkflowData();
+    }
+    closeModal(); render();
+    toast(action==='approve'?'Loan application approved. It is ready for disbursement.':'Loan application rejected.','success');
+  }catch(error){ toast('Application review failed: '+error.message,'error'); }
+}
+
+function openRejectLoanApplication(applicationId){
+  const app=state.data.loanApplications.find(a=>a.id===applicationId);
+  const member=state.data.members.find(m=>m.id===app?.member_id);
+  modal({title:'Reject loan application',body:`
+    <p style="margin-top:0">Record why the ${KES(app?.loan_value)} application for <b>${escapeHtml(member?.full_name||'this member')}</b> is being rejected.</p>
+    <div class="field"><label>Rejection reason</label><textarea id="loan-rejection-reason" rows="4" required placeholder="Reason for rejection"></textarea></div>`,
+    actions:[{label:'Cancel',onClick:()=>openLoanApplicationDetails(applicationId)},{label:'Reject application',cls:'btn-danger',onClick:()=>{
+      const reason=$('loan-rejection-reason').value.trim();
+      if(!reason) return toast('Enter a rejection reason.','error');
+      reviewLoanApplication(applicationId,'reject',reason);
+    }}]});
+}
+
+function openDisburseLoanApplication(applicationId){
+  const app=state.data.loanApplications.find(a=>a.id===applicationId);
+  const member=state.data.members.find(m=>m.id===app?.member_id);
+  if(!app||app.status!=='approved') return toast('Only approved applications can be disbursed.','error');
+  modal({title:'Disburse approved loan',body:`
+    <div class="auth-info" style="margin-bottom:14px"><b>${escapeHtml(member?.full_name||'Member')}</b> will receive <b>${KES(app.net_disbursement)}</b> after ${KES(app.upfront_deductions)} in deductions. The repayment balance will be ${KES(app.total_payable)}.</div>
+    <div class="field"><label>Disbursement date</label><input id="loan-disbursement-date" type="date" value="${todayISO()}" min="${app.application_date}" max="${todayISO()}" required /></div>`,
+    actions:[{label:'Cancel',onClick:()=>openLoanApplicationDetails(applicationId)},{label:'Confirm disbursement',cls:'btn-primary',onClick:()=>disburseLoanApplication(applicationId)}]});
+}
+
+async function disburseLoanApplication(applicationId){
+  const app=state.data.loanApplications.find(a=>a.id===applicationId);
+  const date=$('loan-disbursement-date')?.value;
+  if(!date) return toast('Enter the disbursement date.','error');
+  if(isFutureISODate(date)) return toast('Disbursement date cannot be in the future.','error');
+  if(date<app.application_date) return toast('Disbursement date cannot be before the application date.','error');
+  try{
+    if(state.preview){
+      if(state.data.loans.some(l=>l.member_id===app.member_id&&l.status==='active')) throw new Error('This member already has an active loan');
+      const loan={
+        id:'loan-'+Date.now(),business_id:app.business_id,member_id:app.member_id,group_id:app.group_id,
+        officer_id:app.officer_id,product_name:app.product_name,asset_name:null,loan_cycle:app.loan_cycle,
+        loan_value:app.loan_value,required_savings:app.required_savings,insurance_amount:app.upfront_deductions,
+        interest_amount:app.interest_amount,interest_rate:app.interest_rate,weekly_installment:app.weekly_installment,
+        total_payable:app.total_payable,net_disbursement:app.net_disbursement,term_weeks:app.term_weeks,
+        start_date:date,expected_end_date:addWeeksISO(date,Number(app.term_weeks)),status:'active',terms_source:'confirmed'
+      };
+      state.data.loans.unshift(loan); app.status='disbursed'; app.loan_id=loan.id; app.disbursement_date=date; app.disbursed_by=state.staff.id; app.disbursed_at=new Date().toISOString();
+    }else{
+      if(!(await ensureFreshToken())) return;
+      const {error}=await sb.rpc('rh_disburse_loan_application',{p_application_id:applicationId,p_disbursement_date:date});
+      if(error) throw error;
+      await refreshLoanWorkflowData();
+    }
+    closeModal(); render(); toast('Loan disbursed and added to the active loan portfolio.','success');
+  }catch(error){ toast('Loan could not be disbursed: '+error.message,'error'); }
 }
 
 /* =====================================================================
@@ -3798,7 +4101,7 @@ function pageLoans(){
   $('page').innerHTML = `
     <div class="page-head">
       <div><h1>Cash loan portfolio</h1><div class="desc">Cycle-based cash loans issued to group members.</div></div>
-      ${(isAdmin||state.perms?.can_issue_loans) ? `<div class="actions"><button class="btn btn-primary" onclick="openCashLoan()">${loanIcon()} Issue cash loan</button></div>` : ''}
+      <div class="actions"><button class="btn btn-primary" onclick="go('loanApplications')">${applicationIcon()} Loan applications</button></div>
     </div>
     <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
       <div class="tabs" style="margin-bottom:0; border-bottom:none;">
@@ -3957,7 +4260,7 @@ function pageLoans(){
               <td><span class="badge ${bcls}">${l.status}</span></td>
               <td><button class="act-btn" onclick="loanActions(event,'${l.id}')"> - - - </button></td>
             </tr>`;
-          }).join('') || `<tr><td colspan="${isAdmin?15:14}"><div class="empty"><h4>No cash loans found</h4><p>Issue a loan after confirming the member's savings and cycle eligibility.</p></div></td></tr>`}
+          }).join('') || `<tr><td colspan="${isAdmin?15:14}"><div class="empty"><h4>No cash loans found</h4><p>Approved applications appear here after an administrator confirms disbursement.</p></div></td></tr>`}
         </tbody>
       </table>
     </div>
@@ -4233,7 +4536,7 @@ function pageCalculator(){
   $('page').innerHTML = `
     <div class="page-head">
       <div><h1>Loan products</h1><div class="desc">Approved cash-loan bands, savings requirements and repayment terms.</div></div>
-      ${(state.staff.role==='admin'||state.perms?.can_issue_loans)?`<div class="actions"><button class="btn btn-primary" onclick="openCashLoan()">${loanIcon()} Issue cash loan</button></div>`:''}
+      <div class="actions"><button class="btn btn-primary" onclick="go('loanApplications')">${applicationIcon()} Loan applications</button></div>
     </div>
     <div class="tabs">
       <button class="${cycle===1?'active':''}" onclick="state._calcCycle=1;pageCalculator()">First cycle</button>
@@ -4435,7 +4738,7 @@ function openStaffForm(s=null){
         const ins = { auth_user_id, business_id: state.staff.business_id || null, full_name: row.full_name, email: row.email.toLowerCase(), phone: row.phone||null, role: row.role, status:'active' };
         const { data: created, error: e2 } = await sb.from('rh_staff').insert(ins).select().single();
         if(e2) return toast(e2.message,'error');
-        await sb.from('rh_permissions').insert({ staff_id: created.id, business_id: state.staff.business_id });
+        await sb.from('rh_permissions').insert({ staff_id: created.id, business_id: state.staff.business_id, can_issue_loans: created.role==='officer' });
         state.data.staff.unshift(created);
         audit('create_staff','rh_staff',created.id,null,ins);
         closeModal(); render(); toast('Staff account created. Officer must verify email before signing in.','success');
@@ -4452,7 +4755,7 @@ async function editPerms(id){
     ['can_manage_members','Manage members'],
     ['can_record_savings','Record savings'],
     ['can_record_repayments','Record loan repayments'],
-    ['can_issue_loans','Issue cash loans'],
+    ['can_issue_loans','Submit loan applications'],
     ['can_view_reports','View financial reports'],
     ['can_manage_staff','Manage staff and permissions']
   ];
@@ -6718,12 +7021,14 @@ function exportAccountingReport(){
 }
 function loadLocalPreview(){
   const businessId='preview-business', adminId='preview-admin', officerId='preview-officer';
+  const previewAsOfficer=new URLSearchParams(location.search).get('role')==='officer';
   const groupA={id:'group-a',business_id:businessId,name:'Umoja Women Group',group_number:1,group_code:'4102',location:'Nairobi',meeting_day:'Monday',meeting_time:'10:00',officer_id:officerId,status:'active'};
   const groupB={id:'group-b',business_id:businessId,name:'Together We Rise Group',group_number:2,group_code:'5831',location:'Kiambu',meeting_day:'Thursday',meeting_time:'14:00',officer_id:officerId,status:'active'};
   const members=[
     {id:'member-a',business_id:businessId,group_id:groupA.id,full_name:'Jane Wanjiku',national_id:'RLG-1001',phone:'0712 000 101',registered_on:addDaysISO(todayISO(),-180),status:'active'},
     {id:'member-b',business_id:businessId,group_id:groupA.id,full_name:'Mary Atieno',national_id:'RLG-1002',phone:'0712 000 102',registered_on:addDaysISO(todayISO(),-150),status:'active'},
-    {id:'member-c',business_id:businessId,group_id:groupB.id,full_name:'Lucy Njeri',national_id:'RLG-1003',phone:'0712 000 103',registered_on:addDaysISO(todayISO(),-120),status:'active'}
+    {id:'member-c',business_id:businessId,group_id:groupB.id,full_name:'Lucy Njeri',national_id:'RLG-1003',phone:'0712 000 103',registered_on:addDaysISO(todayISO(),-120),status:'active'},
+    {id:'member-d',business_id:businessId,group_id:groupA.id,full_name:'Amina Hassan',national_id:'RLG-1004',phone:'0712 000 104',registered_on:addDaysISO(todayISO(),-90),status:'active'}
   ];
   const previewLoan=(id,memberId,groupId,product,startDays)=>({
     id,business_id:businessId,member_id:memberId,group_id:groupId,officer_id:officerId,
@@ -6737,19 +7042,36 @@ function loadLocalPreview(){
     previewLoan('loan-a','member-a',groupA.id,loanProduct('25000-6'),-28),
     previewLoan('loan-b','member-c',groupB.id,loanProduct('50000-12'),-14)
   ];
+  const adminPreview={id:adminId,business_id:businessId,auth_user_id:'preview-admin-user',full_name:'Rhostine Administrator',email:'preview@rhostine.local',role:'admin',status:'active'};
+  const officerPreview={id:officerId,business_id:businessId,auth_user_id:'preview-officer-user',full_name:'Grace Mwikali',email:'officer@rhostine.local',role:'officer',status:'active'};
+  const pendingBand=loanProduct('10000-6');
+  const pendingApplication={
+    id:'application-preview',business_id:businessId,member_id:'member-b',group_id:groupA.id,meeting_id:null,officer_id:officerId,
+    product_id:pendingBand.id,product_name:`Cycle ${pendingBand.cycle} Cash Loan - ${pendingBand.months} Months`,loan_cycle:pendingBand.cycle,
+    loan_value:pendingBand.principal,term_months:pendingBand.months,term_weeks:pendingBand.weeks,interest_rate:pendingBand.interestRate,
+    interest_amount:pendingBand.interest,total_payable:pendingBand.totalPayable,weekly_installment:pendingBand.weekly,
+    required_savings:pendingBand.savings,savings_at_application:3100,completed_loans_at_application:0,
+    insurance_fee:pendingBand.insuranceFee,other_fee:pendingBand.applicationFee||pendingBand.processingFee,
+    upfront_deductions:pendingBand.insurance,net_disbursement:pendingBand.netDisbursement,application_date:todayISO(),
+    notes:'Member requested working capital during the weekly meeting.',status:'pending',created_at:new Date().toISOString(),updated_at:new Date().toISOString()
+  };
   state.preview=true;
-  state.session={user:{id:'preview-user',email:'preview@rhostine.local'}};
-  state.staff={id:adminId,business_id:businessId,auth_user_id:'preview-user',full_name:'Rhostine Administrator',email:'preview@rhostine.local',role:'admin',status:'active'};
-  state.perms={can_manage_groups:true,can_manage_members:true,can_record_savings:true,can_record_repayments:true,can_issue_loans:true,can_view_reports:true,can_manage_staff:true};
+  state.staff=previewAsOfficer?officerPreview:adminPreview;
+  state.session={user:{id:state.staff.auth_user_id,email:state.staff.email}};
+  state.perms=previewAsOfficer
+    ? {can_manage_groups:false,can_manage_members:true,can_record_savings:true,can_record_repayments:true,can_issue_loans:true,can_view_reports:false,can_manage_staff:false}
+    : {can_manage_groups:true,can_manage_members:true,can_record_savings:true,can_record_repayments:true,can_issue_loans:true,can_view_reports:true,can_manage_staff:true};
   state.settings={id:'biz_'+businessId,business_id:businessId,business_name:'Rhostine Limited Groups',registration_fee:200,savings_threshold:1600,max_loan_weeks:50,receipt_footer:'Together We Rise'};
   state.billing={status:'paid',paid:true,locked:false,reminder:false,pending:false};
   state.data.groups=[groupA,groupB]; state.data.members=members; state.data.guarantors=[];
-  state.data.staff=[state.staff,{id:officerId,business_id:businessId,full_name:'Grace Mwikali',email:'officer@rhostine.local',role:'officer',status:'active'}];
+  state.data.staff=[adminPreview,officerPreview];
   state.data.loans=loans;
+  state.data.loanApplications=[pendingApplication];
   state.data.savings=[
     {id:'saving-a',business_id:businessId,member_id:'member-a',group_id:groupA.id,meeting_date:addDaysISO(todayISO(),-7),amount:6000,type:'savings',status:'approved',recorded_by:officerId},
     {id:'saving-b',business_id:businessId,member_id:'member-b',group_id:groupA.id,meeting_date:addDaysISO(todayISO(),-7),amount:3100,type:'savings',status:'approved',recorded_by:officerId},
-    {id:'saving-c',business_id:businessId,member_id:'member-c',group_id:groupB.id,meeting_date:addDaysISO(todayISO(),-3),amount:15000,type:'savings',status:'approved',recorded_by:officerId}
+    {id:'saving-c',business_id:businessId,member_id:'member-c',group_id:groupB.id,meeting_date:addDaysISO(todayISO(),-3),amount:15000,type:'savings',status:'approved',recorded_by:officerId},
+    {id:'saving-d',business_id:businessId,member_id:'member-d',group_id:groupA.id,meeting_date:addDaysISO(todayISO(),-7),amount:2200,type:'savings',status:'approved',recorded_by:officerId}
   ];
   state.data.repayments=[
     {id:'rep-a',business_id:businessId,loan_id:'loan-a',member_id:'member-a',group_id:groupA.id,meeting_date:addDaysISO(todayISO(),-7),amount:1180,principal:1000,interest:180,status:'approved',recorded_by:officerId},

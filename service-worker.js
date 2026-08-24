@@ -1,4 +1,4 @@
-const CACHE_NAME = 'rhostine-limited-groups-v3';
+const CACHE_NAME = 'rhostine-limited-groups-v4';
 const CORE_ASSETS = [
   '/',
   '/index.html',

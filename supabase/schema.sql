@@ -154,6 +154,58 @@ create table if not exists public.rh_meetings (
   unique (group_id, meeting_date)
 );
 
+create table if not exists public.rh_loan_applications (
+  id uuid primary key default gen_random_uuid(),
+  business_id uuid not null references public.rh_businesses(id),
+  member_id uuid not null references public.rh_members(id),
+  group_id uuid not null references public.rh_groups(id),
+  meeting_id uuid references public.rh_meetings(id),
+  officer_id uuid not null references public.rh_staff(id),
+  product_id text not null,
+  product_name text not null,
+  loan_cycle integer not null check (loan_cycle in (1,2)),
+  loan_value numeric(14,2) not null check (loan_value > 0),
+  term_months integer not null check (term_months in (6,9,12)),
+  term_weeks integer not null check (term_weeks in (25,36,50)),
+  interest_rate numeric(9,4) not null,
+  interest_amount numeric(14,2) not null,
+  total_payable numeric(14,2) not null,
+  weekly_installment numeric(14,2) not null,
+  required_savings numeric(14,2) not null,
+  savings_at_application numeric(14,2) not null default 0,
+  completed_loans_at_application integer not null default 0,
+  insurance_fee numeric(14,2) not null,
+  other_fee numeric(14,2) not null,
+  upfront_deductions numeric(14,2) not null,
+  net_disbursement numeric(14,2) not null,
+  application_date date not null,
+  notes text,
+  status text not null default 'pending' check (status in ('pending','approved','rejected','disbursed')),
+  reviewed_by uuid references public.rh_staff(id),
+  reviewed_at timestamptz,
+  rejection_reason text,
+  disbursement_date date,
+  disbursed_by uuid references public.rh_staff(id),
+  disbursed_at timestamptz,
+  loan_id uuid unique references public.rh_loans(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create unique index if not exists rh_one_open_loan_application_per_member
+  on public.rh_loan_applications(member_id) where status in ('pending','approved');
+
+do $$
+begin
+  if exists (select 1 from pg_publication where pubname='supabase_realtime')
+    and not exists (
+      select 1 from pg_publication_tables
+      where pubname='supabase_realtime' and schemaname='public' and tablename='rh_loan_applications'
+    ) then
+    alter publication supabase_realtime add table public.rh_loan_applications;
+  end if;
+end $$;
+
 create table if not exists public.rh_savings (
   id uuid primary key default gen_random_uuid(),
   business_id uuid not null references public.rh_businesses(id),
@@ -284,6 +336,35 @@ $$;
 revoke all on function public.rh_current_business_id() from public;
 grant execute on function public.rh_current_business_id() to authenticated;
 
+create or replace function public.rh_current_staff_id()
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select id from public.rh_staff
+  where auth_user_id=auth.uid() and status='active'
+  limit 1
+$$;
+
+create or replace function public.rh_current_staff_role()
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select role from public.rh_staff
+  where auth_user_id=auth.uid() and status='active'
+  limit 1
+$$;
+
+revoke all on function public.rh_current_staff_id() from public;
+revoke all on function public.rh_current_staff_role() from public;
+grant execute on function public.rh_current_staff_id() to authenticated;
+grant execute on function public.rh_current_staff_role() to authenticated;
+
 create or replace function public.rh_register_business_admin(
   p_auth_user_id uuid,
   p_business_name text,
@@ -346,12 +427,24 @@ declare t text;
 begin
   foreach t in array array[
     'rh_businesses','rh_staff','rh_permissions','rh_settings','rh_groups','rh_members','rh_guarantors',
-    'rh_loans','rh_meetings','rh_savings','rh_repayments','rh_reconciliations','rh_expenses',
+    'rh_loans','rh_meetings','rh_loan_applications','rh_savings','rh_repayments','rh_reconciliations','rh_expenses',
     'rh_mpesa_transactions','rh_audit_log','rh_billing_cycles'
   ] loop
     execute format('alter table public.%I enable row level security',t);
   end loop;
 end $$;
+
+drop policy if exists rh_loan_applications_select on public.rh_loan_applications;
+create policy rh_loan_applications_select on public.rh_loan_applications
+for select to authenticated
+using (
+  business_id=public.rh_current_business_id()
+  and (public.rh_current_staff_role()='admin' or officer_id=public.rh_current_staff_id())
+);
+
+revoke insert, update, delete on public.rh_loan_applications from anon, authenticated;
+grant select on public.rh_loan_applications to authenticated;
+revoke insert on public.rh_loans from anon, authenticated;
 
 drop policy if exists rh_staff_business_access on public.rh_staff;
 create policy rh_staff_business_access on public.rh_staff for all to authenticated
@@ -377,6 +470,8 @@ end $$;
 create index if not exists rh_members_group_idx on public.rh_members(group_id);
 create index if not exists rh_loans_member_idx on public.rh_loans(member_id,status);
 create index if not exists rh_loans_group_idx on public.rh_loans(group_id,status);
+create index if not exists rh_loan_applications_business_status_idx on public.rh_loan_applications(business_id,status,application_date desc);
+create index if not exists rh_loan_applications_officer_idx on public.rh_loan_applications(officer_id,application_date desc);
 create index if not exists rh_savings_member_date_idx on public.rh_savings(member_id,meeting_date desc);
 create index if not exists rh_repayments_loan_date_idx on public.rh_repayments(loan_id,meeting_date desc);
 create index if not exists rh_reconciliations_group_date_idx on public.rh_reconciliations(group_id,meeting_date desc);

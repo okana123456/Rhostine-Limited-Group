@@ -6,7 +6,9 @@ The client subscription schedule begins on 1 October 2026. Admins receive a paym
 
 ## Loan model
 
-- Loans are issued as cash to registered group members.
+- Officers submit loan applications for registered group members during meetings.
+- Administrators approve or reject applications, then separately confirm cash disbursement.
+- Only confirmed disbursement creates an active loan and repayment balance.
 - Cycle 1 and Cycle 2 use fixed product bands reconstructed from the supplied schedules.
 - Required savings, insurance, principal plus interest, weekly instalment and term are stored on each loan.
 - Reconciled rows are explicitly marked provisional until management provides the signed product schedule.
@@ -17,9 +19,10 @@ The client subscription schedule begins on 1 October 2026. Admins receive a paym
 1. Run `supabase/preflight-audit.sql` and retain the result.
 2. Take a Supabase dashboard backup or a `pg_dump` before any live change.
 3. Review and run `supabase/schema.sql`.
-4. Run `supabase/verify.sql` and confirm all checks pass.
-5. Configure a valid project URL and anon key in `index.html`.
-6. Deploy the static `index.html` and `assets/` directory.
+4. Apply files in `supabase/migrations/` in timestamp order.
+5. Run `supabase/verify.sql` and confirm all checks pass.
+6. Configure a valid project URL and anon key in `index.html`.
+7. Deploy the static `index.html` and `assets/` directory.
 
 `supabase/rollback.sql` removes only an empty installation. It intentionally stops if any Rhostine operational table contains records.
 

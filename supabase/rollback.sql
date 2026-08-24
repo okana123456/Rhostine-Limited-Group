@@ -6,7 +6,7 @@ declare
   t text;
   has_rows boolean;
 begin
-  foreach t in array array['rh_groups','rh_members','rh_loans','rh_savings','rh_repayments','rh_reconciliations','rh_expenses'] loop
+  foreach t in array array['rh_groups','rh_members','rh_loan_applications','rh_loans','rh_savings','rh_repayments','rh_reconciliations','rh_expenses'] loop
     if to_regclass('public.'||t) is not null then
       execute format('select exists(select 1 from public.%I)',t) into has_rows;
       if has_rows then populated := concat_ws(', ',nullif(populated,''),t); end if;
@@ -19,6 +19,11 @@ end $$;
 
 drop function if exists public.rh_register_business_admin(uuid,text,text,text,text);
 drop function if exists public.rh_delete_staff_auth(uuid);
+drop function if exists public.rh_disburse_loan_application(uuid,date);
+drop function if exists public.rh_review_loan_application(uuid,text,text);
+drop function if exists public.rh_submit_loan_application(uuid,uuid,date,text,text);
+drop function if exists public.rh_current_staff_role();
+drop function if exists public.rh_current_staff_id();
 drop function if exists public.rh_current_business_id();
 drop table if exists public.rh_billing_cycles;
 drop table if exists public.rh_audit_log;
@@ -27,6 +32,7 @@ drop table if exists public.rh_expenses;
 drop table if exists public.rh_reconciliations;
 drop table if exists public.rh_repayments;
 drop table if exists public.rh_savings;
+drop table if exists public.rh_loan_applications;
 drop table if exists public.rh_meetings;
 drop table if exists public.rh_loans;
 drop table if exists public.rh_guarantors;

@@ -4,4 +4,4 @@
 *.backup
 *.dump
 node_modules/
-
+supabase/backups/private/
