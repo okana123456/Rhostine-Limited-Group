@@ -2511,10 +2511,24 @@ function openGroupForm(g=null){
       { label:'Cancel', onClick: closeModal },
       { label: g?'Save changes':'Register group', cls:'btn-primary', onClick: async () => {
         if(!(await ensureFreshToken())) return;
-        const fd = new FormData($('gform'));
-        const row = Object.fromEntries(fd.entries());
-        row.group_number = parseInt(row.group_number);
-        row.officer_id = row.officer_id || null;
+        const form = $('gform');
+        if(!form.reportValidity()) return;
+        const fd = new FormData(form);
+        const groupNumber = Number(fd.get('group_number'));
+        if(!Number.isInteger(groupNumber) || groupNumber < 1) return toast('Enter a valid group number.','error');
+        const row = {
+          group_number: groupNumber,
+          name: String(fd.get('name')||'').trim(),
+          meeting_day: String(fd.get('meeting_day')||''),
+          meeting_time: fd.get('meeting_time') || null,
+          location: String(fd.get('location')||'').trim() || null,
+          chairman_name: String(fd.get('chairman_name')||'').trim() || null,
+          chairman_phone: String(fd.get('chairman_phone')||'').trim() || null,
+          treasurer_name: String(fd.get('treasurer_name')||'').trim() || null,
+          treasurer_phone: String(fd.get('treasurer_phone')||'').trim() || null,
+          officer_id: fd.get('officer_id') || null,
+          status: fd.get('status') === 'inactive' ? 'inactive' : 'active'
+        };
         if(g){
           // Preserve existing group_code; if somehow missing (legacy record), assign one now
           if(!g.group_code) row.group_code = generateGroupCode();

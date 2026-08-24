@@ -1,0 +1,14 @@
+{
+  "captured_at": "2026-08-24T22:58:29.232778+03:00",
+  "project_ref": "kqgxwbdenjehwppuliqs",
+  "table": "public.rh_groups",
+  "reason": "Backup before adding the group_number column required by the group registration form.",
+  "group_rows": [],
+  "row_counts": {
+    "groups": 0,
+    "members": 0,
+    "loans": 0,
+    "savings": 0,
+    "repayments": 0
+  }
+}

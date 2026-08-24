@@ -59,6 +59,7 @@ create table if not exists public.rh_groups (
   id uuid primary key default gen_random_uuid(),
   business_id uuid not null references public.rh_businesses(id),
   name text not null,
+  group_number integer not null check (group_number > 0),
   group_code text,
   location text,
   chairman_name text,
@@ -71,6 +72,7 @@ create table if not exists public.rh_groups (
   status text not null default 'active' check (status in ('active','inactive')),
   created_at timestamptz not null default now(),
   unique (business_id, name),
+  unique (business_id, group_number),
   unique (business_id, group_code)
 );
 
