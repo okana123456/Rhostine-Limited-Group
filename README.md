@@ -2,6 +2,8 @@
 
 Professional group-lending operations system for cash loans, savings, repayments, meetings, remittances, expenses, staff controls and reporting.
 
+Member registration supports a private profile photo plus categorized business and household-chattel evidence. PNG and JPG images are resized and compressed in the browser before upload; PDFs must be no more than 1 MB. Files are stored in a private, business-isolated Supabase bucket and opened only through short-lived signed links.
+
 The client subscription schedule begins on 1 October 2026. Admins receive a payment reminder on the 1st and 2nd of each month, with the unpaid-account restriction beginning on the 3rd.
 
 ## Loan model
@@ -23,6 +25,8 @@ The client subscription schedule begins on 1 October 2026. Admins receive a paym
 5. Run `supabase/verify.sql` and confirm all checks pass.
 6. Configure a valid project URL and anon key in `index.html`.
 7. Deploy the static `index.html` and `assets/` directory.
+
+For an existing installation, apply `supabase/migrations/20260825090000_member_documents.sql` after retaining the pre-migration backup. Its paired rollback refuses to run once any member document exists, preventing accidental file loss.
 
 `supabase/rollback.sql` removes only an empty installation. It intentionally stops if any Rhostine operational table contains records.
 

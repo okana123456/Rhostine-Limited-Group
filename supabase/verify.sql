@@ -14,6 +14,20 @@ where schemaname='public' and tablename like 'rh_%'
 group by tablename
 order by tablename;
 
+select id,name,public,file_size_limit,allowed_mime_types
+from storage.buckets
+where id='rh-member-documents';
+
+select policyname,cmd
+from pg_policies
+where schemaname='storage' and tablename='objects'
+  and policyname like 'rh_member_documents_storage_%'
+order by policyname;
+
+select
+  (select count(*) from public.rh_member_documents) as member_document_rows,
+  (select count(*) from storage.objects where bucket_id='rh-member-documents') as stored_member_files;
+
 select routine_name
 from information_schema.routines
 where routine_schema='public' and routine_name in (

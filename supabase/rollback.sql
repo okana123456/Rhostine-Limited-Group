@@ -6,7 +6,7 @@ declare
   t text;
   has_rows boolean;
 begin
-  foreach t in array array['rh_groups','rh_members','rh_loan_applications','rh_loans','rh_savings','rh_repayments','rh_reconciliations','rh_expenses'] loop
+  foreach t in array array['rh_groups','rh_members','rh_member_documents','rh_loan_applications','rh_loans','rh_savings','rh_repayments','rh_reconciliations','rh_expenses'] loop
     if to_regclass('public.'||t) is not null then
       execute format('select exists(select 1 from public.%I)',t) into has_rows;
       if has_rows then populated := concat_ws(', ',nullif(populated,''),t); end if;
@@ -22,9 +22,12 @@ drop function if exists public.rh_delete_staff_auth(uuid);
 drop function if exists public.rh_disburse_loan_application(uuid,date);
 drop function if exists public.rh_review_loan_application(uuid,text,text);
 drop function if exists public.rh_submit_loan_application(uuid,uuid,date,text,text);
-drop function if exists public.rh_current_staff_role();
-drop function if exists public.rh_current_staff_id();
-drop function if exists public.rh_current_business_id();
+drop policy if exists rh_member_documents_storage_delete on storage.objects;
+drop policy if exists rh_member_documents_storage_update on storage.objects;
+drop policy if exists rh_member_documents_storage_insert on storage.objects;
+drop policy if exists rh_member_documents_storage_select on storage.objects;
+delete from storage.buckets where id='rh-member-documents'
+  and not exists (select 1 from storage.objects where bucket_id='rh-member-documents');
 drop table if exists public.rh_billing_cycles;
 drop table if exists public.rh_audit_log;
 drop table if exists public.rh_mpesa_transactions;
@@ -36,9 +39,14 @@ drop table if exists public.rh_loan_applications;
 drop table if exists public.rh_meetings;
 drop table if exists public.rh_loans;
 drop table if exists public.rh_guarantors;
+drop table if exists public.rh_member_documents;
+drop function if exists public.rh_enforce_member_document_limit();
 drop table if exists public.rh_members;
 drop table if exists public.rh_groups;
 drop table if exists public.rh_permissions;
 drop table if exists public.rh_settings;
 drop table if exists public.rh_staff;
 drop table if exists public.rh_businesses;
+drop function if exists public.rh_current_staff_role();
+drop function if exists public.rh_current_staff_id();
+drop function if exists public.rh_current_business_id();
