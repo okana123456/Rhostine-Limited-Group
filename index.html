@@ -191,6 +191,7 @@ tr[style*="danger-50"] .sticky-name{background:var(--danger-50)}
 .modal-back.show{display:flex}
 .modal{background:var(--surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);width:100%;max-width:520px;max-height:92vh;display:flex;flex-direction:column}
 .modal.lg{max-width:780px}
+.modal.xl{max-width:980px}
 .modal-head{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
 .modal-head h3{margin:0;font-size:15px;font-weight:700;letter-spacing:-.01em}
 .modal-body{padding:20px;overflow-y:auto;flex:1}
@@ -217,10 +218,26 @@ tr[style*="danger-50"] .sticky-name{background:var(--danger-50)}
 .document-row{display:flex;align-items:center;gap:10px;min-width:0;padding:8px 10px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm)}
 .document-row .document-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:600}
 .document-row .document-meta{font-size:11px;color:var(--text-muted);white-space:nowrap}
+.document-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;margin-top:10px}
+.document-card{display:flex;flex-direction:column;min-width:0;padding:0;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;background:var(--surface);color:var(--text);text-align:left;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+.document-card:hover,.document-card:focus-visible{border-color:var(--accent);box-shadow:var(--shadow-sm);outline:none}
+.document-preview{height:150px;background:var(--surface-2);display:grid;place-items:center;overflow:hidden;position:relative}
+.document-preview img,.document-preview object,.document-preview iframe{width:100%;height:100%;display:block;border:0;object-fit:cover;pointer-events:none;background:#fff}
+.document-preview.profile-preview img{object-fit:cover}
+.document-preview-loading{font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:7px}
+.document-card-body{padding:10px;min-width:0}
+.document-card-name{font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.document-card-meta{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:5px;color:var(--text-muted);font-size:11px}
+.document-card-actions{font-weight:800;letter-spacing:0}
+.document-full-preview{height:min(64vh,620px);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;background:var(--surface-2);display:grid;place-items:center}
+.document-full-preview img{width:100%;height:100%;object-fit:contain;background:#111}
+.document-full-preview object,.document-full-preview iframe{width:100%;height:100%;border:0;background:#fff}
+.document-replace-preview{max-width:360px;margin:14px auto 0}
 .member-profile-heading{display:flex;align-items:center;gap:14px;min-width:0}
 .member-photo{width:64px;height:64px;border-radius:50%;object-fit:cover;border:2px solid var(--surface);box-shadow:0 0 0 1px var(--border);background:var(--primary-50);color:var(--primary);display:grid;place-items:center;font-size:18px;font-weight:700;flex-shrink:0}
+.member-photo[type=button]{padding:0;cursor:pointer}
 .member-photo img{width:100%;height:100%;object-fit:cover;border-radius:inherit;display:block}
-@media(max-width:520px){.member-photo{width:52px;height:52px}.member-profile-heading{align-items:flex-start}.document-row{align-items:flex-start;flex-wrap:wrap}.document-row .document-name{flex-basis:calc(100% - 36px)}}
+@media(max-width:520px){.member-photo{width:52px;height:52px}.member-profile-heading{align-items:flex-start}.document-row{align-items:flex-start;flex-wrap:wrap}.document-row .document-name{flex-basis:calc(100% - 36px)}.document-gallery{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.document-preview{height:126px}.document-full-preview{height:58vh}}
 
 /* Toolbar */
 .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
@@ -2703,6 +2720,7 @@ const MEMBER_DOCUMENT_MAX_SOURCE_BYTES = 25 * 1024 * 1024;
 const MEMBER_DOCUMENT_LIMITS = { profile:1, business:5, chattels:5 };
 const MEMBER_DOCUMENT_LABELS = { profile:'Profile photo', business:'Business evidence', chattels:'Household chattels' };
 const memberDocumentUrlCache = new Map();
+const memberDraftUrlCache = new WeakMap();
 
 function memberDocuments(memberId, category=null){
   return state.data.memberDocuments.filter(d => d.member_id===memberId && (!category || d.category===category));
@@ -2710,6 +2728,20 @@ function memberDocuments(memberId, category=null){
 function formatFileSize(bytes){
   const n=Number(bytes||0);
   return n>=1024*1024 ? `${(n/1024/1024).toFixed(1)} MB` : `${Math.max(1,Math.round(n/1024))} KB`;
+}
+function isPdfDocument(value){
+  return value?.mime_type==='application/pdf' || value?.type==='application/pdf' || /\.pdf$/i.test(value?.original_name||value?.name||'');
+}
+function draftDocumentUrl(file){
+  if(!memberDraftUrlCache.has(file)) memberDraftUrlCache.set(file,URL.createObjectURL(file));
+  return memberDraftUrlCache.get(file);
+}
+function documentPreviewContent(value,url,{full=false}={}){
+  const name=escapeHtml(value.original_name||value.name||'Member document');
+  if(isPdfDocument(value)){
+    return `<iframe src="${url}#toolbar=${full?'1':'0'}&navpanes=0&page=1" title="Preview of ${name}" loading="lazy"></iframe>`;
+  }
+  return `<img src="${url}" alt="Preview of ${name}" loading="lazy" />`;
 }
 function acceptedMemberDocument(file, category){
   const ext=(file.name.split('.').pop()||'').toLowerCase();
@@ -2764,12 +2796,14 @@ async function optimiseMemberDocument(file, category){
 }
 function documentDraftRows(files, category, removable=true){
   if(!files?.length) return '<div class="muted" style="font-size:12px;margin-top:9px">No files selected.</div>';
-  return `<div class="document-list">${files.map((f,i)=>`
-    <div class="document-row">
-      <span aria-hidden="true">${(f.type==='application/pdf'||/\.pdf$/i.test(f.name))?'PDF':'IMG'}</span>
-      <span class="document-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</span>
-      <span class="document-meta">${formatFileSize(f.size)}${f.size>MEMBER_DOCUMENT_MAX_BYTES && !/\.pdf$/i.test(f.name)?' - will compress':''}</span>
-      ${removable?`<button type="button" class="btn btn-sm btn-ghost" title="Remove file" aria-label="Remove ${escapeHtml(f.name)}" onclick="removeDocumentDraft('${category}',${i})">&times;</button>`:''}
+  return `<div class="document-gallery">${files.map((f,i)=>`
+    <div class="document-card" style="cursor:default">
+      <div class="document-preview">${documentPreviewContent(f,draftDocumentUrl(f))}</div>
+      <div class="document-card-body">
+        <div class="document-card-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</div>
+        <div class="document-card-meta"><span>${formatFileSize(f.size)}${f.size>MEMBER_DOCUMENT_MAX_BYTES && !isPdfDocument(f)?' - will compress':''}</span>
+        ${removable?`<button type="button" class="btn btn-sm btn-ghost" title="Remove file" aria-label="Remove ${escapeHtml(f.name)}" onclick="removeDocumentDraft('${category}',${i})">&times;</button>`:''}</div>
+      </div>
     </div>`).join('')}</div>`;
 }
 function documentPickerHtml(category, files, inputId){
@@ -2810,8 +2844,7 @@ async function uploadMemberDocument(memberId,category,file){
   const prepared=await optimiseMemberDocument(file,category);
   const businessId=state.staff.business_id;
   const ext=prepared.type==='application/pdf'?'pdf':'jpg';
-  const suffix=category==='profile'?'current':`${Date.now()}-${crypto.randomUUID().slice(0,8)}`;
-  const path=`${businessId}/${memberId}/${category}/${suffix}.${ext}`;
+  const path=memberDocumentStoragePath(businessId,memberId,category,ext);
   const {error:uploadError}=await sb.storage.from(MEMBER_DOCUMENT_BUCKET).upload(path,prepared,{contentType:prepared.type,cacheControl:'3600',upsert:category==='profile'});
   if(uploadError) throw uploadError;
   const row={business_id:businessId,member_id:memberId,category,storage_path:path,original_name:file.name,mime_type:prepared.type,byte_size:prepared.size,created_by:state.staff.id};
@@ -2830,6 +2863,10 @@ async function uploadMemberDocument(memberId,category,file){
   }
   return result;
 }
+function memberDocumentStoragePath(businessId,memberId,category,ext){
+  const suffix=category==='profile'?'current':`${Date.now()}-${crypto.randomUUID().slice(0,8)}`;
+  return `${businessId}/${memberId}/${category}/${suffix}.${ext}`;
+}
 async function uploadMemberDocuments(memberId,draft,onProgress=()=>{}){
   const jobs=['profile','business','chattels'].flatMap(category=>(draft[category]||[]).map(file=>({category,file})));
   const failures=[];
@@ -2843,10 +2880,19 @@ async function uploadMemberDocuments(memberId,draft,onProgress=()=>{}){
 async function openMemberDocument(id){
   const doc=state.data.memberDocuments.find(x=>x.id===id);
   if(!doc) return toast('Document record not found.','error');
-  try{ window.open(await signedMemberDocumentUrl(doc,90),'_blank','noopener'); }
-  catch(error){ toast('Document could not be opened: '+error.message,'error'); }
+  const popup=window.open('about:blank','_blank');
+  if(popup) popup.opener=null;
+  try{
+    const url=await signedMemberDocumentUrl(doc,300);
+    if(popup) popup.location.replace(url);
+    else window.location.href=url;
+  }catch(error){
+    popup?.close();
+    toast('Document could not be opened: '+error.message,'error');
+  }
 }
 async function signedMemberDocumentUrl(doc,seconds){
+  if(doc.preview_url) return doc.preview_url;
   const key=`${doc.id}:${doc.updated_at||doc.created_at||''}:${seconds}`;
   const cached=memberDocumentUrlCache.get(key);
   if(cached && cached.expires>Date.now()) return cached.url;
@@ -2854,6 +2900,134 @@ async function signedMemberDocumentUrl(doc,seconds){
   if(error) throw error;
   memberDocumentUrlCache.set(key,{url:data.signedUrl,expires:Date.now()+Math.max(10000,(seconds-30)*1000)});
   return data.signedUrl;
+}
+function invalidateMemberDocumentUrls(documentId){
+  for(const key of memberDocumentUrlCache.keys()) if(key.startsWith(documentId+':')) memberDocumentUrlCache.delete(key);
+}
+async function loadMemberDocumentPreviews(docs){
+  await Promise.all((docs||[]).map(async doc=>{
+    const hosts=Array.from(document.querySelectorAll(`[data-document-preview="${doc.id}"]`));
+    if(!hosts.length) return;
+    try{
+      const url=await signedMemberDocumentUrl(doc,900);
+      hosts.forEach(host=>{ if(host.isConnected) host.innerHTML=documentPreviewContent(doc,url,{full:host.classList.contains('document-full-preview')}); });
+    }catch{
+      hosts.forEach(host=>{ if(host.isConnected) host.innerHTML='<div class="document-preview-loading">Preview unavailable</div>'; });
+    }
+  }));
+}
+function openMemberDocumentActions(id){
+  const doc=state.data.memberDocuments.find(x=>x.id===id);
+  if(!doc) return toast('Document record not found.','error');
+  modal({
+    title:escapeHtml(doc.original_name),
+    size:'xl',
+    body:`<div class="document-full-preview" data-document-preview="${doc.id}"><div class="document-preview-loading"><span class="spinner"></span> Loading preview...</div></div>
+      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--text-muted)"><span>${MEMBER_DOCUMENT_LABELS[doc.category]}</span><span>${formatFileSize(doc.byte_size)} - ${doc.mime_type==='application/pdf'?'PDF':'Image'}</span></div>`,
+    actions:[
+      {label:'Close',onClick:closeModal},
+      {label:'Delete',cls:'btn-danger',onClick:()=>confirmMemberDocumentDelete(doc.id)},
+      {label:'Edit / replace',onClick:()=>openReplaceMemberDocument(doc.id)},
+      {label:'View full',cls:'btn-primary',onClick:()=>openMemberDocument(doc.id)}
+    ]
+  });
+  loadMemberDocumentPreviews([doc]);
+}
+function openReplaceMemberDocument(id){
+  const doc=state.data.memberDocuments.find(x=>x.id===id);
+  if(!doc) return toast('Document record not found.','error');
+  if(state._replacementDocumentId!==id){ state._replacementDocumentId=id; state._replacementFile=null; }
+  const file=state._replacementFile;
+  const accept=doc.category==='profile'?'image/png,image/jpeg':'image/png,image/jpeg,application/pdf';
+  modal({
+    title:`Replace ${MEMBER_DOCUMENT_LABELS[doc.category].toLowerCase()}`,
+    size:'lg',
+    body:`<div class="auth-info">The new file will replace <b>${escapeHtml(doc.original_name)}</b>. Images are compressed before upload; PDFs must be 1 MB or smaller.</div>
+      <div class="document-upload"><div class="document-upload-head"><div><h4>Choose replacement</h4><div class="muted" style="font-size:12px">${doc.category==='profile'?'PNG or JPG':'PNG, JPG or PDF'}</div></div>
+      <input type="file" accept="${accept}" onchange="selectReplacementDocument('${doc.id}',this.files)" /></div>
+      ${file?`<div class="document-replace-preview">${documentDraftRows([file],doc.category,false)}</div>`:'<div class="muted" style="font-size:12px;margin-top:10px">No replacement selected.</div>'}</div>`,
+    actions:[
+      {label:'Cancel',onClick:()=>{state._replacementDocumentId=null;state._replacementFile=null;closeModal();}},
+      {label:'Replace file',cls:'btn-primary',onClick:()=>saveReplacementDocument(doc.id)}
+    ]
+  });
+}
+function selectReplacementDocument(id,fileList){
+  const doc=state.data.memberDocuments.find(x=>x.id===id);
+  const file=Array.from(fileList||[])[0];
+  if(!doc || !file) return;
+  const problem=acceptedMemberDocument(file,doc.category);
+  if(problem) return toast(problem,'error');
+  state._replacementDocumentId=id; state._replacementFile=file;
+  openReplaceMemberDocument(id);
+}
+async function saveReplacementDocument(id){
+  const doc=state.data.memberDocuments.find(x=>x.id===id);
+  const file=state._replacementDocumentId===id ? state._replacementFile : null;
+  if(!doc || !file) return toast('Choose a replacement file first.','error');
+  if(!navigator.onLine) return toast('An internet connection is required to replace documents.','error');
+  if(!(await ensureFreshToken())) return;
+  const button=document.querySelector('#modal-root .btn-primary');
+  if(button){button.disabled=true;button.textContent='Preparing file...';}
+  try{
+    const prepared=await optimiseMemberDocument(file,doc.category);
+    if(button) button.textContent='Uploading replacement...';
+    const ext=prepared.type==='application/pdf'?'pdf':'jpg';
+    const oldPath=doc.storage_path;
+    const newPath=doc.category==='profile' ? oldPath : memberDocumentStoragePath(doc.business_id,doc.member_id,doc.category,ext);
+    const {error:uploadError}=await sb.storage.from(MEMBER_DOCUMENT_BUCKET).upload(newPath,prepared,{contentType:prepared.type,cacheControl:'3600',upsert:doc.category==='profile'});
+    if(uploadError) throw uploadError;
+    const update={storage_path:newPath,original_name:file.name,mime_type:prepared.type,byte_size:prepared.size,created_by:state.staff.id,updated_at:new Date().toISOString()};
+    const {data,error:updateError}=await sb.from('rh_member_documents').update(update).eq('id',doc.id).select().single();
+    if(updateError){
+      if(newPath!==oldPath) await sb.storage.from(MEMBER_DOCUMENT_BUCKET).remove([newPath]);
+      throw updateError;
+    }
+    Object.assign(doc,data);
+    invalidateMemberDocumentUrls(doc.id);
+    let cleanupWarning='';
+    if(newPath!==oldPath){
+      const {error:removeError}=await sb.storage.from(MEMBER_DOCUMENT_BUCKET).remove([oldPath]);
+      if(removeError) cleanupWarning=' The previous stored copy could not be cleaned up automatically.';
+    }
+    audit('replace_member_document','rh_member_documents',doc.id,{storage_path:oldPath},{storage_path:newPath,original_name:file.name,byte_size:prepared.size});
+    state._replacementDocumentId=null; state._replacementFile=null; closeModal(); pageMemberProfile();
+    toast('Document replaced successfully.'+cleanupWarning,cleanupWarning?'warn':'success');
+  }catch(error){
+    if(button){button.disabled=false;button.textContent='Replace file';}
+    toast('Document replacement failed: '+error.message,'error');
+  }
+}
+function confirmMemberDocumentDelete(id){
+  const doc=state.data.memberDocuments.find(x=>x.id===id);
+  if(!doc) return;
+  confirmDialog(
+    `Permanently delete <b>${escapeHtml(doc.original_name)}</b>? This removes only this document and cannot be undone.`,
+    ()=>deleteMemberDocument(id),
+    {title:'Delete member document',danger:true}
+  );
+}
+async function deleteMemberDocument(id){
+  const doc=state.data.memberDocuments.find(x=>x.id===id);
+  if(!doc) return;
+  if(!navigator.onLine) return toast('An internet connection is required to delete documents.','error');
+  if(!(await ensureFreshToken())) return;
+  try{
+    const {data:backup,error:downloadError}=await sb.storage.from(MEMBER_DOCUMENT_BUCKET).download(doc.storage_path);
+    if(downloadError) throw downloadError;
+    const {error:removeError}=await sb.storage.from(MEMBER_DOCUMENT_BUCKET).remove([doc.storage_path]);
+    if(removeError) throw removeError;
+    const {error:deleteError}=await sb.from('rh_member_documents').delete().eq('id',doc.id);
+    if(deleteError){
+      const {error:restoreError}=await sb.storage.from(MEMBER_DOCUMENT_BUCKET).upload(doc.storage_path,backup,{contentType:doc.mime_type,cacheControl:'3600',upsert:true});
+      if(restoreError) throw new Error(`${deleteError.message}. Automatic file restoration also failed: ${restoreError.message}`);
+      throw deleteError;
+    }
+    state.data.memberDocuments=state.data.memberDocuments.filter(x=>x.id!==doc.id);
+    invalidateMemberDocumentUrls(doc.id);
+    audit('delete_member_document','rh_member_documents',doc.id,{original_name:doc.original_name,category:doc.category,byte_size:doc.byte_size},null);
+    closeModal(); pageMemberProfile(); toast('Document deleted.','success');
+  }catch(error){ toast('Document could not be deleted: '+error.message,'error'); }
 }
 async function loadMemberProfilePhoto(memberId){
   const doc=memberDocuments(memberId,'profile')[0];
@@ -2879,6 +3053,7 @@ function openMemberDocumentsManager(member){
     {label:'Cancel',onClick:()=>{state._documentDraft=null;state._documentManagerMember=null;closeModal();}},
     {label:'Upload selected',cls:'btn-primary',onClick:()=>saveManagedDocuments(member.id)}
   ]});
+  loadMemberDocumentPreviews(docs);
 }
 async function saveManagedDocuments(memberId){
   const total=Object.values(state._documentDraft||{}).reduce((n,a)=>n+a.length,0);
@@ -2894,13 +3069,13 @@ async function saveManagedDocuments(memberId){
   else toast(`${result.uploaded} document${result.uploaded===1?'':'s'} uploaded securely.`,'success');
 }
 function storedDocumentRows(docs){
-  return `<div class="document-list">${docs.map(doc=>`<div class="document-row">
-    <span aria-hidden="true">${doc.mime_type==='application/pdf'?'PDF':'IMG'}</span>
-    <span class="document-name" title="${escapeHtml(doc.original_name)}">${escapeHtml(doc.original_name)}</span>
-    <span class="badge b-grey">${MEMBER_DOCUMENT_LABELS[doc.category]}</span>
-    <span class="document-meta">${formatFileSize(doc.byte_size)}</span>
-    <button class="btn btn-sm btn-outline" onclick="openMemberDocument('${doc.id}')">Open</button>
-  </div>`).join('')}</div>`;
+  return `<div class="document-gallery">${docs.map(doc=>`<button type="button" class="document-card" onclick="openMemberDocumentActions('${doc.id}')" aria-label="Open ${escapeHtml(doc.original_name)} actions">
+    <span class="document-preview ${doc.category==='profile'?'profile-preview':''}" data-document-preview="${doc.id}"><span class="document-preview-loading"><span class="spinner"></span> Loading preview...</span></span>
+    <span class="document-card-body">
+      <span class="document-card-name" title="${escapeHtml(doc.original_name)}">${escapeHtml(doc.original_name)}</span>
+      <span class="document-card-meta"><span>${doc.mime_type==='application/pdf'?'PDF':'Image'} - ${formatFileSize(doc.byte_size)}</span><span class="document-card-actions" aria-hidden="true">...</span></span>
+    </span>
+  </button>`).join('')}</div>`;
 }
 
 /* ----- Member registration wizard (5 steps) ----- */
@@ -3274,6 +3449,7 @@ function pageMemberProfile(){
   const allLoans = state.data.loans.filter(l=>l.member_id===m.id).sort((a,b)=>new Date(b.start_date)-new Date(a.start_date));
   const repayments = state.data.repayments.filter(r=>r.member_id===m.id).sort((a,b)=>b.meeting_date.localeCompare(a.meeting_date));
   const docs = memberDocuments(m.id).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  const profileDoc = docs.find(d=>d.category==='profile');
   const perf = memberPerformance(m.id);
   const risk = loanHistoryRisk(m.id);
   const tab = state._memberProfileTab || 'overview';
@@ -3291,7 +3467,9 @@ function pageMemberProfile(){
       <div>
         <button class="btn btn-ghost" onclick="go('members')"><- Back to members</button>
         <div class="member-profile-heading" style="margin-top:6px">
-          <div class="member-photo" id="member-profile-photo" aria-label="${escapeHtml(m.full_name)} profile photo">${initials(m.full_name)}</div>
+          ${profileDoc
+            ? `<button type="button" class="member-photo" id="member-profile-photo" aria-label="Open ${escapeHtml(m.full_name)} profile photo actions" title="View or manage profile photo" onclick="openMemberDocumentActions('${profileDoc.id}')">${initials(m.full_name)}</button>`
+            : `<div class="member-photo" id="member-profile-photo" aria-label="${escapeHtml(m.full_name)} profile photo">${initials(m.full_name)}</div>`}
           <div style="min-width:0"><h1 style="margin:0">${m.full_name}</h1><div class="desc">${g?.name||' - '} - ID ${m.national_id} - ${m.phone||''}</div></div>
         </div>
       </div>
@@ -3522,6 +3700,7 @@ function pageMemberProfile(){
     </div>
   `;
   loadMemberProfilePhoto(m.id);
+  if(tab==='documents') loadMemberDocumentPreviews(docs);
   // Attach event listeners for member profile savings custom date range
   const mpSavStartEl = document.getElementById('mp-sav-start');
   const mpSavEndEl = document.getElementById('mp-sav-end');
@@ -7330,6 +7509,10 @@ function loadLocalPreview(){
   state.settings={id:'biz_'+businessId,business_id:businessId,business_name:'Rhostine Limited Groups',registration_fee:200,savings_threshold:1600,max_loan_weeks:50,receipt_footer:'Together We Rise'};
   state.billing={status:'paid',paid:true,locked:false,reminder:false,pending:false};
   state.data.groups=[groupA,groupB]; state.data.members=members; state.data.guarantors=[];
+  state.data.memberDocuments=[
+    {id:'document-profile-preview',business_id:businessId,member_id:'member-a',category:'profile',storage_path:'preview/profile.jpg',original_name:'jane-wanjiku-profile.jpg',mime_type:'image/jpeg',byte_size:57797,created_by:adminId,created_at:new Date().toISOString(),updated_at:new Date().toISOString(),preview_url:'assets/rhostine-logo.png'},
+    {id:'document-business-preview',business_id:businessId,member_id:'member-a',category:'business',storage_path:'preview/business.jpg',original_name:'business-premises.jpg',mime_type:'image/jpeg',byte_size:36974,created_by:adminId,created_at:new Date().toISOString(),updated_at:new Date().toISOString(),preview_url:'assets/rhostine-logo.png'}
+  ];
   state.data.staff=[adminPreview,officerPreview];
   state.data.loans=loans;
   state.data.loanApplications=[pendingApplication];

@@ -2,7 +2,7 @@
 
 Professional group-lending operations system for cash loans, savings, repayments, meetings, remittances, expenses, staff controls and reporting.
 
-Member registration supports a private profile photo plus categorized business and household-chattel evidence. PNG and JPG images are resized and compressed in the browser before upload; PDFs must be no more than 1 MB. Files are stored in a private, business-isolated Supabase bucket and opened only through short-lived signed links.
+Member registration supports a private profile photo plus categorized business and household-chattel evidence. PNG and JPG images are resized and compressed in the browser before upload; PDFs must be no more than 1 MB. Files are stored in a private, business-isolated Supabase bucket and opened only through short-lived signed links. The member profile includes visual image/PDF previews and confirmed controls to view, replace or delete each file.
 
 The client subscription schedule begins on 1 October 2026. Admins receive a payment reminder on the 1st and 2nd of each month, with the unpaid-account restriction beginning on the 3rd.
 
