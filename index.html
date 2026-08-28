@@ -2866,8 +2866,9 @@ function documentPickerHtml(category, files, inputId){
   </div>`;
 }
 function selectDocumentDraft(category, fileList){
-  const target=state._documentDraft || state._wizardData?.documents;
+  const target=state._documentDraft || state._wizardData?.documents || state._loanApplicationDraft?.documents;
   if(!target) return;
+  saveLoanApplicationDraftFields();
   const incoming=Array.from(fileList||[]);
   const valid=[];
   for(const file of incoming){
@@ -2875,18 +2876,22 @@ function selectDocumentDraft(category, fileList){
     if(problem){ toast(`${file.name}: ${problem}`,'error'); continue; }
     valid.push(file);
   }
-  const alreadyStored=state._documentDraft && category!=='profile' ? memberDocuments(state._documentManagerMember.id,category).length : 0;
+  const draftMemberId=state._documentDraft ? state._documentManagerMember?.id : state._loanApplicationDraft?.memberId;
+  const alreadyStored=draftMemberId && category!=='profile' ? memberDocuments(draftMemberId,category).length : 0;
   const available=Math.max(0,MEMBER_DOCUMENT_LIMITS[category]-alreadyStored);
   if(category!=='profile' && available===0) toast(`This member already has the maximum of ${MEMBER_DOCUMENT_LIMITS[category]} ${MEMBER_DOCUMENT_LABELS[category].toLowerCase()} files.`,'warn');
   target[category]=category==='profile' ? valid.slice(0,1) : [...(target[category]||[]),...valid].slice(0,available);
   if(state._documentDraft) openMemberDocumentsManager(state._documentManagerMember);
+  else if(state._loanApplicationDraft) renderMeetingLoanApplicationModal(state._loanApplicationDraft.memberId);
   else renderWizard();
 }
 function removeDocumentDraft(category,index){
-  const target=state._documentDraft || state._wizardData?.documents;
+  const target=state._documentDraft || state._wizardData?.documents || state._loanApplicationDraft?.documents;
   if(!target) return;
+  saveLoanApplicationDraftFields();
   target[category].splice(index,1);
   if(state._documentDraft) openMemberDocumentsManager(state._documentManagerMember);
+  else if(state._loanApplicationDraft) renderMeetingLoanApplicationModal(state._loanApplicationDraft.memberId);
   else renderWizard();
 }
 async function uploadMemberDocument(memberId,category,file){
@@ -2925,6 +2930,13 @@ async function uploadMemberDocuments(memberId,draft,onProgress=()=>{}){
     catch(error){ failures.push(`${job.file.name}: ${error.message}`); }
   }
   return {uploaded:jobs.length-failures.length,failures};
+}
+async function refreshMemberDocuments(){
+  if(state.preview || !state.staff?.business_id) return;
+  const {data,error}=await sb.from('rh_member_documents').select('*').eq('business_id',state.staff.business_id).limit(5000);
+  if(error) throw error;
+  state.data.memberDocuments=data || [];
+  lsSet('memberDocuments',state.data.memberDocuments);
 }
 async function openMemberDocument(id){
   const doc=state.data.memberDocuments.find(x=>x.id===id);
@@ -3135,15 +3147,14 @@ function openMemberWizard(){
     address:'', nearest_town:'', occupation:'', employer:'', income_estimate:'',
     group_id:'', registered_on: todayISO(), officer_id:'',
     registration_fee: state.settings?.registration_fee || 200,
-    guarantors:[ { full_name:'', national_id:'', phone:'', location:'', relationship:'' } ],
-    documents:{profile:[],business:[],chattels:[]}
+    guarantors:[ { full_name:'', national_id:'', phone:'', location:'', relationship:'' } ]
   };
   renderWizard();
 }
 function renderWizard(){
   const s = state._wizardStep;
   const d = state._wizardData;
-  const stepLabels = ['Personal details','Group assignment','Guarantor details','Documents','Review & confirm'];
+  const stepLabels = ['Personal details','Group assignment','Next of kin','Review & confirm'];
   modal({
     title: 'Register member',
     size:'lg',
@@ -3157,7 +3168,7 @@ function renderWizard(){
       </div>
       <div id="wiz-body">${renderWizardStep()}</div>
     `,
-    actions:[...(s>1 ? [{ label:'Back', onClick: ()=>{ saveWizardStep(); state._wizardStep--; renderWizard(); } }] : [{ label:'Cancel', onClick: closeModal }]),...(s<5 ? [{ label:'Continue', cls:'btn-primary', onClick: ()=>{ if(saveWizardStep()){ state._wizardStep++; renderWizard(); } } }] :
+    actions:[...(s>1 ? [{ label:'Back', onClick: ()=>{ saveWizardStep(); state._wizardStep--; renderWizard(); } }] : [{ label:'Cancel', onClick: closeModal }]),...(s<4 ? [{ label:'Continue', cls:'btn-primary', onClick: ()=>{ if(saveWizardStep()){ state._wizardStep++; renderWizard(); } } }] :
               [{ label:'Confirm registration', cls:'btn-primary', onClick: submitWizard }])
     ]
   });
@@ -3209,11 +3220,11 @@ function renderWizardStep(){
   }
   if(s===3){
     return `
-      <p class="muted" style="margin-top:0">At least one guarantor is required. A second guarantor is recommended for higher loan amounts.</p>
+      <p class="muted" style="margin-top:0">Record at least one next of kin contact for this member.</p>
       ${d.guarantors.map((gn,i) => `
         <div class="card card-pad" style="margin-bottom:12px">
           <div class="card-head" style="padding:0 0 12px;border:none">
-            <h3>Guarantor ${i+1}</h3>
+            <h3>Next of kin ${i+1}</h3>
             ${i>0 ? `<button class="btn btn-sm btn-outline" onclick="removeGuarantor(${i})">Remove</button>` : ''}
           </div>
           <div class="grid-2">
@@ -3229,16 +3240,10 @@ function renderWizardStep(){
           </div>
         </div>
       `).join('')}
-      ${d.guarantors.length<2 ? `<button class="btn btn-outline" onclick="addGuarantor()">Add second guarantor</button>` : ''}
+      ${d.guarantors.length<2 ? `<button class="btn btn-outline" onclick="addGuarantor()">Add another next of kin</button>` : ''}
     `;
   }
-  if(s===4) return `
-    <div class="auth-info">Documents are optional. Selected images will be resized and compressed before upload to reduce storage and data usage.</div>
-    ${documentPickerHtml('profile',d.documents.profile,'w-doc-profile')}
-    ${documentPickerHtml('business',d.documents.business,'w-doc-business')}
-    ${documentPickerHtml('chattels',d.documents.chattels,'w-doc-chattels')}
-  `;
-  // Step 5: Review
+  // Step 4: Review
   const g = state.data.groups.find(x=>x.id===d.group_id);
   const off = state.data.staff.find(x=>x.id===(d.officer_id||g?.officer_id));
   return `
@@ -3259,14 +3264,10 @@ function renderWizardStep(){
       <tr><td>Meeting day</td><td>${g?.meeting_day||' - '}</td></tr>
       <tr><td>Loan officer</td><td>${off?.full_name||' - '}</td></tr>
       <tr><td>Date of registration</td><td>${fmtDate(d.registered_on)}</td></tr>
-      <tr><td colspan="2"><h5>Guarantors</h5></td></tr>
-      ${d.guarantors.map((gn,i)=>`<tr><td>Guarantor ${i+1}</td><td>${gn.full_name} - ${gn.national_id} - ${gn.phone}${gn.relationship?' - '+gn.relationship:''}</td></tr>`).join('')}
+      <tr><td colspan="2"><h5>Next of kin</h5></td></tr>
+      ${d.guarantors.map((gn,i)=>`<tr><td>Next of kin ${i+1}</td><td>${gn.full_name} - ${gn.national_id} - ${gn.phone}${gn.relationship?' - '+gn.relationship:''}</td></tr>`).join('')}
       <tr><td colspan="2"><h5>Fee</h5></td></tr>
       <tr><td>Registration fee</td><td><b>${KES(d.registration_fee)}</b></td></tr>
-      <tr><td colspan="2"><h5>Documents</h5></td></tr>
-      <tr><td>Profile photo</td><td>${d.documents.profile.length?'1 selected':'Not provided'}</td></tr>
-      <tr><td>Business evidence</td><td>${d.documents.business.length} selected</td></tr>
-      <tr><td>Household chattels</td><td>${d.documents.chattels.length} selected</td></tr>
     </table>
   `;
 }
@@ -3294,7 +3295,7 @@ function saveWizardStep(){
       d.guarantors[parseInt(el.dataset.g)][el.dataset.f] = el.value;
     });
     const g1 = d.guarantors[0];
-    if(!g1.full_name || !g1.national_id || !g1.phone){ toast('At least one complete guarantor is required.','error'); return false; }
+    if(!g1.full_name || !g1.national_id || !g1.phone){ toast('At least one complete next of kin is required.','error'); return false; }
   }
   return true;
 }
@@ -3304,8 +3305,6 @@ function removeGuarantor(i){ saveWizardStep(); state._wizardData.guarantors.spli
 async function submitWizard(){
   if(!(await ensureFreshToken())) return;
   const d = state._wizardData;
-  const documentCount=Object.values(d.documents).reduce((n,a)=>n+a.length,0);
-  if(documentCount && !navigator.onLine) return toast('An internet connection is required to register a member with documents.','error');
   const submitButton=document.querySelector('#modal-root .btn-primary');
   if(submitButton){submitButton.disabled=true;submitButton.textContent='Registering member...';}
   const g = state.data.groups.find(x=>x.id===d.group_id);
@@ -3334,26 +3333,18 @@ async function submitWizard(){
   }));
   if(guars.length){
     const { error: ge } = await sb.from('rh_guarantors').insert(guars);
-    if(ge) toast('Member saved, but guarantor save failed: '+ge.message, 'warn');
+    if(ge) toast('Member saved, but next of kin save failed: '+ge.message, 'warn');
     else state.data.guarantors.push(...guars);
   }
   state.data.members.unshift(created);
-  let documentResult={uploaded:0,failures:[]};
-  if(documentCount){
-    documentResult=await uploadMemberDocuments(created.id,d.documents,(i,n)=>{
-      if(submitButton) submitButton.textContent=`Uploading ${i} of ${n}...`;
-    });
-  }
   audit('register_member','rh_members',created.id,null,memberRow);
-  if(documentCount) audit('upload_member_documents','rh_member_documents',created.id,null,{uploaded:documentResult.uploaded,failed:documentResult.failures.length});
   closeModal();
   render();
-  if(documentResult.failures.length) toast(`Member registered. ${documentResult.uploaded} document(s) uploaded; ${documentResult.failures.length} failed: ${documentResult.failures.join('; ')}`, 'warn');
-  else toast(documentCount ? `Member registered with ${documentResult.uploaded} secure document${documentResult.uploaded===1?'':'s'}.` : 'Member registered successfully.', 'success');
+  toast('Member registered successfully.', 'success');
 }
 
 function openMemberEdit(m){
-  // Fetch existing guarantor for this member
+  // The existing table stores the member's next of kin contact.
   const existingGuarantor = state.data.guarantors.find(g => g.member_id === m.id) || {};
   modal({
     title:'Edit member',
@@ -3370,11 +3361,11 @@ function openMemberEdit(m){
         </div>
       </div>
       <div class="divider"></div>
-      <div style="font-weight:700;font-size:13px;margin-bottom:10px">Guarantor details</div>
+      <div style="font-weight:700;font-size:13px;margin-bottom:10px">Next of kin details</div>
       <div class="grid-2">
-        <div class="field"><label>Guarantor Name</label><input id="me-g-name" value="${existingGuarantor.full_name||''}" placeholder="Full name" /></div>
-        <div class="field"><label>Guarantor Phone</label><input id="me-g-phone" value="${existingGuarantor.phone||''}" placeholder="07XX XXX XXX" /></div>
-        <div class="field"><label>Guarantor ID</label><input id="me-g-id" value="${existingGuarantor.national_id||''}" placeholder="National ID number" /></div>
+        <div class="field"><label>Next of kin name</label><input id="me-g-name" value="${existingGuarantor.full_name||''}" placeholder="Full name" /></div>
+        <div class="field"><label>Next of kin phone</label><input id="me-g-phone" value="${existingGuarantor.phone||''}" placeholder="07XX XXX XXX" /></div>
+        <div class="field"><label>Next of kin ID</label><input id="me-g-id" value="${existingGuarantor.national_id||''}" placeholder="National ID number" /></div>
       </div>
     </form>`,
     actions:[
@@ -3386,7 +3377,7 @@ function openMemberEdit(m){
         const { error } = await sb.from('rh_members').update(row).eq('id', m.id);
         if(error) return toast(error.message,'error');
         Object.assign(m, row);
-        // Upsert guarantor if any field is provided
+        // Upsert next of kin if any field is provided.
         const gName = document.getElementById('me-g-name')?.value.trim();
         const gPhone = normalisePhone(document.getElementById('me-g-phone')?.value||''  );
         const gNatId = document.getElementById('me-g-id')?.value.trim();
@@ -3398,11 +3389,11 @@ function openMemberEdit(m){
           };
           if(existingGuarantor.id){
             const { error: ge } = await sb.from('rh_guarantors').update({ full_name: gRow.full_name, phone: gRow.phone, national_id: gRow.national_id }).eq('id', existingGuarantor.id);
-            if(ge) toast('Member saved, but guarantor update failed: '+ge.message,'warn');
+            if(ge) toast('Member saved, but next of kin update failed: '+ge.message,'warn');
             else { Object.assign(existingGuarantor, gRow); }
           } else {
             const { data: newG, error: ge } = await sb.from('rh_guarantors').insert(gRow).select().single();
-            if(ge) toast('Member saved, but guarantor save failed: '+ge.message,'warn');
+            if(ge) toast('Member saved, but next of kin save failed: '+ge.message,'warn');
             else state.data.guarantors.push(newG);
           }
         }
@@ -3577,12 +3568,12 @@ function pageMemberProfile(){
             </table>
           </div>
           <div class="card card-pad">
-            <h3 style="margin:0 0 12px">Guarantors</h3>
+            <h3 style="margin:0 0 12px">Next of kin</h3>
             ${guars.length ? guars.map(gn=>`
               <div style="padding:10px 0;border-bottom:1px solid var(--border)">
                 <div style="font-weight:600">${gn.full_name} <span class="muted" style="font-weight:400;font-size:12px"> -  ${gn.relationship||' - '}</span></div>
                 <div class="muted" style="font-size:12px">ID ${gn.national_id} - ${gn.phone} - ${gn.location||''}</div>
-              </div>`).join('') : '<p class="muted">No guarantors recorded.</p>'}
+              </div>`).join('') : '<p class="muted">No next of kin recorded.</p>'}
           </div>
         </div>
       ` : ''}
@@ -4109,27 +4100,71 @@ function openMeetingLoanApplication(memberId){
 
   const completedLoans = state.data.loans.filter(l=>l.member_id===member.id && l.status==='completed').length;
   const products = RHOSTINE_LOAN_PRODUCTS.filter(p=>p.cycle===1 || completedLoans>0);
+  state._loanApplicationDraft = {
+    memberId:member.id,
+    productId:products[0]?.id || '',
+    notes:'',
+    documents:{profile:[],business:[],chattels:[]}
+  };
+  renderMeetingLoanApplicationModal(member.id);
+}
+
+function saveLoanApplicationDraftFields(){
+  const draft=state._loanApplicationDraft;
+  if(!draft) return;
+  const product=$('la-product');
+  const notes=$('la-notes');
+  if(product) draft.productId=product.value;
+  if(notes) draft.notes=notes.value;
+}
+
+function renderMeetingLoanApplicationModal(memberId){
+  const meeting = state._meet;
+  const member = state.data.members.find(x=>x.id===memberId);
+  const group = state.data.groups.find(x=>x.id===meeting?.groupId);
+  if(!member || !group || !meeting?.date) return toast('Select a group and meeting date first.','error');
+  const completedLoans = state.data.loans.filter(l=>l.member_id===member.id && l.status==='completed').length;
+  const products = RHOSTINE_LOAN_PRODUCTS.filter(p=>p.cycle===1 || completedLoans>0);
+  const draft=state._loanApplicationDraft || {
+    memberId:member.id,
+    productId:products[0]?.id || '',
+    notes:'',
+    documents:{profile:[],business:[],chattels:[]}
+  };
+  state._loanApplicationDraft=draft;
+  if(!products.some(p=>p.id===draft.productId)) draft.productId=products[0]?.id || '';
   modal({
     title:'New loan application',size:'lg',
     body:`<form id="loan-application-form" data-member-id="${member.id}">
       <div class="auth-info" style="margin-bottom:14px"><b>${escapeHtml(member.full_name)}</b> - ${escapeHtml(group.name)} - Meeting ${fmtDate(meeting.date)}</div>
       <div class="grid-2">
         <div class="field"><label>Loan product</label><select id="la-product" required onchange="loanApplicationPreview()">
-          ${products.map(p=>`<option value="${p.id}">Cycle ${p.cycle} - ${KES(p.principal)} - ${p.months} months</option>`).join('')}
+          ${products.map(p=>`<option value="${p.id}" ${draft.productId===p.id?'selected':''}>Cycle ${p.cycle} - ${KES(p.principal)} - ${p.months} months</option>`).join('')}
         </select></div>
         <div class="field"><label>Application date</label><input value="${meeting.date}" disabled /></div>
       </div>
-      <div class="field"><label>Officer notes</label><textarea id="la-notes" rows="3" placeholder="Purpose of the loan or meeting remarks"></textarea></div>
+      <div class="field"><label>Officer notes</label><textarea id="la-notes" rows="3" placeholder="Purpose of the loan or meeting remarks">${escapeHtml(draft.notes||'')}</textarea></div>
       <div id="loan-application-preview" style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px"></div>
+      <div class="divider"></div>
+      <div class="auth-info">Attach the documents needed for this loan application. Images are compressed before upload; PDFs must be 1 MB or smaller.</div>
+      ${documentPickerHtml('profile',draft.documents.profile,'la-doc-profile')}
+      ${documentPickerHtml('business',draft.documents.business,'la-doc-business')}
+      ${documentPickerHtml('chattels',draft.documents.chattels,'la-doc-chattels')}
     </form>`,
     actions:[
-      {label:'Cancel',onClick:closeModal},
+      {label:'Cancel',onClick:()=>{state._loanApplicationDraft=null;closeModal();}},
       {label:'Submit application',cls:'btn-primary',onClick:async()=>{
         const form=$('loan-application-form');
         if(!form.reportValidity()) return;
+        saveLoanApplicationDraftFields();
         const band=loanProduct($('la-product').value);
         if(!band) return toast('Select a valid loan product.','error');
-        const notes=$('la-notes').value.trim();
+        const notes=(state._loanApplicationDraft?.notes||'').trim();
+        const documents=state._loanApplicationDraft?.documents || {profile:[],business:[],chattels:[]};
+        const documentCount=Object.values(documents).reduce((n,a)=>n+a.length,0);
+        if(documentCount && !navigator.onLine) return toast('An internet connection is required to submit a loan application with documents.','error');
+        const submitButton=document.querySelector('#modal-root .btn-primary');
+        if(submitButton){submitButton.disabled=true;submitButton.textContent='Submitting application...';}
         try{
           if(state.preview){
             const app={
@@ -4154,10 +4189,35 @@ function openMeetingLoanApplication(memberId){
             if(error) throw error;
             await refreshLoanWorkflowData();
           }
+          let documentResult={uploaded:0,failures:[]};
+          if(documentCount && !state.preview){
+            if(submitButton) submitButton.textContent='Preparing documents...';
+            documentResult=await uploadMemberDocuments(member.id,documents,(i,n)=>{
+              if(submitButton) submitButton.textContent=`Uploading document ${i} of ${n}...`;
+            });
+            try{ await refreshMemberDocuments(); }catch(refreshError){ console.warn('Document refresh failed after upload', refreshError); }
+          }
+          if(documentCount && state.preview){
+            const now=new Date().toISOString();
+            ['profile','business','chattels'].forEach(category=>{
+              (documents[category]||[]).forEach((file,i)=>state.data.memberDocuments.unshift({
+                id:`preview-loan-doc-${category}-${Date.now()}-${i}`,
+                business_id:state.staff.business_id,member_id:member.id,category,
+                original_name:file.name,mime_type:file.type||'image/jpeg',byte_size:file.size,
+                preview_url:draftDocumentUrl(file),created_by:state.staff.id,created_at:now,updated_at:now
+              }));
+            });
+            documentResult={uploaded:documentCount,failures:[]};
+          }
+          state._loanApplicationDraft=null;
           closeModal();
           renderMeetList();
-          toast('Loan application submitted for administrator review.','success');
-        }catch(error){ toast('Application could not be submitted: '+error.message,'error'); }
+          if(documentResult.failures.length) toast(`Loan application submitted. ${documentResult.uploaded} document(s) uploaded; ${documentResult.failures.length} failed: ${documentResult.failures.join('; ')}`,'warn');
+          else toast(documentCount ? `Loan application submitted with ${documentResult.uploaded} secure document${documentResult.uploaded===1?'':'s'}.` : 'Loan application submitted for administrator review.','success');
+        }catch(error){
+          if(submitButton){submitButton.disabled=false;submitButton.textContent='Submit application';}
+          toast('Application could not be submitted: '+error.message,'error');
+        }
       }}
     ]
   });
@@ -4241,6 +4301,7 @@ function openLoanApplicationDetails(applicationId){
   const reviewer=state.data.staff.find(s=>s.id===app.reviewed_by);
   const meta=applicationStatusMeta(app.status);
   const isAdmin=state.staff.role==='admin';
+  const docs=member ? memberDocuments(member.id).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)) : [];
   const actions=[{label:'Close',onClick:closeModal}];
   if(isAdmin&&['pending','approved'].includes(app.status)) actions.push({label:'Reject',cls:'btn-danger',onClick:()=>openRejectLoanApplication(app.id)});
   if(isAdmin&&app.status==='pending') actions.push({label:'Approve application',cls:'btn-primary',onClick:()=>confirmApproveLoanApplication(app.id)});
@@ -4252,10 +4313,21 @@ function openLoanApplicationDetails(applicationId){
     </div>
     <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px">${applicationTermsHtml(app,member)}</div>
     ${app.notes?`<div style="margin-top:14px"><div class="muted" style="font-size:11px">Officer notes</div><div>${escapeHtml(app.notes)}</div></div>`:''}
+    <div style="margin-top:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+        <div><div style="font-weight:700">Loan application documents</div><div class="muted" style="font-size:12px">Profile, business evidence and household chattel files uploaded for this member.</div></div>
+        ${member?`<button class="btn btn-sm btn-outline" onclick="state._documentDraft=null;openMemberDocumentsManager(state.data.members.find(x=>x.id==='${member.id}'))">Manage files</button>`:''}
+      </div>
+      ${docs.length ? ['profile','business','chattels'].map(category=>{
+        const groupDocs=docs.filter(d=>d.category===category);
+        return groupDocs.length ? `<div style="margin-bottom:12px"><div class="muted" style="font-size:11px;margin-bottom:6px">${MEMBER_DOCUMENT_LABELS[category]}</div>${storedDocumentRows(groupDocs)}</div>` : '';
+      }).join('') : '<div class="empty" style="padding:18px"><h4>No documents uploaded</h4><p>Ask the officer to attach the files from the loan application form.</p></div>'}
+    </div>
     ${app.reviewed_at?`<div style="margin-top:14px"><div class="muted" style="font-size:11px">Reviewed by</div><div>${escapeHtml(reviewer?.full_name||'Administrator')} - ${fmtDate(app.reviewed_at)}</div></div>`:''}
     ${app.rejection_reason?`<div class="auth-error" style="margin-top:14px"><b>Rejection reason:</b> ${escapeHtml(app.rejection_reason)}</div>`:''}
     ${app.status==='approved'?`<div class="auth-info" style="margin-top:14px">Approval does not create a debt. The active loan is created only when an administrator confirms disbursement.</div>`:''}
   `,actions});
+  loadMemberDocumentPreviews(docs);
 }
 
 function confirmApproveLoanApplication(applicationId){
