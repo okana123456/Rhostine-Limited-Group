@@ -2506,7 +2506,7 @@ function pageGroups(){
 function groupActions(ev, id){
   const g = state.data.groups.find(x=>x.id===id);
   showActMenu(ev, [
-    { label:'View members', onClick: ()=>{ state.viewCtx = { groupId: id }; go('members'); } },
+    { label:'View members', onClick: ()=>{ state._memberSearch=''; state._membersPage=0; go('members', { groupId: id }); } },
     { label:'Edit group', onClick: ()=>openGroupForm(g) },
     'sep',
     { label:'Delete group', danger:true, onClick: ()=>confirmDialog(`Delete group "${g.name}"? Members and history will be retained but the group record will be removed.`, async()=>{
