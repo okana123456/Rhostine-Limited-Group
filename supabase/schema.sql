@@ -117,7 +117,8 @@ create table if not exists public.rh_member_documents (
   id uuid primary key default gen_random_uuid(),
   business_id uuid not null references public.rh_businesses(id),
   member_id uuid not null references public.rh_members(id) on delete restrict,
-  category text not null check (category in ('profile','business','chattels')),
+  loan_application_id uuid,
+  category text not null check (category in ('profile','business','chattels','loan_form')),
   storage_path text not null unique,
   original_name text not null,
   mime_type text not null check (mime_type in ('image/jpeg','image/png','image/webp','application/pdf')),
@@ -140,6 +141,12 @@ begin
     where member_id=new.member_id and category=new.category
   ) >= 5 then
     raise exception 'A member can have no more than five % documents',new.category;
+  end if;
+  if new.category='loan_form' and new.loan_application_id is not null and (
+    select count(*) from public.rh_member_documents
+    where loan_application_id=new.loan_application_id and category='loan_form'
+  ) >= 1 then
+    raise exception 'A loan application can have no more than one scanned loan form';
   end if;
   return new;
 end $$;
@@ -229,6 +236,15 @@ create table if not exists public.rh_loan_applications (
 
 create unique index if not exists rh_one_open_loan_application_per_member
   on public.rh_loan_applications(member_id) where status in ('pending','approved');
+
+alter table public.rh_member_documents
+  drop constraint if exists rh_member_documents_loan_application_id_fkey;
+
+alter table public.rh_member_documents
+  add constraint rh_member_documents_loan_application_id_fkey
+  foreign key (loan_application_id)
+  references public.rh_loan_applications(id)
+  on delete set null;
 
 do $$
 begin
@@ -519,6 +535,7 @@ revoke all on public.rh_member_documents from anon;
 
 create index if not exists rh_members_group_idx on public.rh_members(group_id);
 create index if not exists rh_member_documents_member_category_idx on public.rh_member_documents(member_id,category,created_at desc);
+create index if not exists rh_member_documents_application_idx on public.rh_member_documents(loan_application_id,category,created_at desc);
 create index if not exists rh_loans_member_idx on public.rh_loans(member_id,status);
 create index if not exists rh_loans_group_idx on public.rh_loans(group_id,status);
 create index if not exists rh_loan_applications_business_status_idx on public.rh_loan_applications(business_id,status,application_date desc);

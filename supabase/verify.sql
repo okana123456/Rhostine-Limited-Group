@@ -28,6 +28,23 @@ select
   (select count(*) from public.rh_member_documents) as member_document_rows,
   (select count(*) from storage.objects where bucket_id='rh-member-documents') as stored_member_files;
 
+select column_name,data_type,is_nullable
+from information_schema.columns
+where table_schema='public'
+  and table_name='rh_member_documents'
+  and column_name in ('loan_application_id','category','storage_path','byte_size')
+order by column_name;
+
+select conname, pg_get_constraintdef(oid) as definition
+from pg_constraint
+where conrelid='public.rh_member_documents'::regclass
+  and conname in ('rh_member_documents_category_check','rh_member_documents_loan_application_id_fkey');
+
+select category,count(*) as rows
+from public.rh_member_documents
+group by category
+order by category;
+
 select routine_name
 from information_schema.routines
 where routine_schema='public' and routine_name in (

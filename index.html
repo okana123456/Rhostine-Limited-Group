@@ -2766,8 +2766,9 @@ function memberActions(ev, id){
 const MEMBER_DOCUMENT_BUCKET = 'rh-member-documents';
 const MEMBER_DOCUMENT_MAX_BYTES = 1024 * 1024;
 const MEMBER_DOCUMENT_MAX_SOURCE_BYTES = 25 * 1024 * 1024;
-const MEMBER_DOCUMENT_LIMITS = { profile:1, business:5, chattels:5 };
-const MEMBER_DOCUMENT_LABELS = { profile:'Profile photo', business:'Business evidence', chattels:'Household chattels' };
+const MEMBER_DOCUMENT_LIMITS = { profile:1, business:5, chattels:5, loan_form:1 };
+const MEMBER_DOCUMENT_LABELS = { profile:'Profile photo', business:'Business evidence', chattels:'Household chattels', loan_form:'Scanned loan form' };
+const LOAN_APPLICATION_DOCUMENT_CATEGORIES = ['loan_form','business','chattels'];
 const memberDocumentUrlCache = new Map();
 const memberDraftUrlCache = new WeakMap();
 
@@ -2857,10 +2858,11 @@ function documentDraftRows(files, category, removable=true){
 }
 function documentPickerHtml(category, files, inputId){
   const profile=category==='profile';
+  const loanForm=category==='loan_form';
   return `<div class="document-upload">
     <div class="document-upload-head">
-      <div><h4>${MEMBER_DOCUMENT_LABELS[category]}</h4><div class="muted" style="font-size:12px">${profile?'One PNG or JPG.':'Up to five PNG, JPG or PDF files.'} Maximum stored size: 1 MB each.</div></div>
-      <input id="${inputId}" type="file" accept="${profile?'image/png,image/jpeg': 'image/png,image/jpeg,application/pdf'}" ${profile?'':'multiple'} onchange="selectDocumentDraft('${category}',this.files)" />
+      <div><h4>${MEMBER_DOCUMENT_LABELS[category]}</h4><div class="muted" style="font-size:12px">${profile?'One PNG or JPG.':loanForm?'One camera scan, image or PDF of the signed loan form.':'Up to five PNG, JPG or PDF files.'} Maximum stored size: 1 MB each.</div></div>
+      <input id="${inputId}" type="file" accept="${profile?'image/png,image/jpeg': 'image/png,image/jpeg,application/pdf'}" ${profile||loanForm?'':'multiple'} onchange="selectDocumentDraft('${category}',this.files)" />
     </div>
     ${documentDraftRows(files,category)}
   </div>`;
@@ -2877,10 +2879,10 @@ function selectDocumentDraft(category, fileList){
     valid.push(file);
   }
   const draftMemberId=state._documentDraft ? state._documentManagerMember?.id : state._loanApplicationDraft?.memberId;
-  const alreadyStored=draftMemberId && category!=='profile' ? memberDocuments(draftMemberId,category).length : 0;
+  const alreadyStored=draftMemberId && category!=='profile' && category!=='loan_form' ? memberDocuments(draftMemberId,category).length : 0;
   const available=Math.max(0,MEMBER_DOCUMENT_LIMITS[category]-alreadyStored);
   if(category!=='profile' && available===0) toast(`This member already has the maximum of ${MEMBER_DOCUMENT_LIMITS[category]} ${MEMBER_DOCUMENT_LABELS[category].toLowerCase()} files.`,'warn');
-  target[category]=category==='profile' ? valid.slice(0,1) : [...(target[category]||[]),...valid].slice(0,available);
+  target[category]=category==='profile' || category==='loan_form' ? valid.slice(0,1) : [...(target[category]||[]),...valid].slice(0,available);
   if(state._documentDraft) openMemberDocumentsManager(state._documentManagerMember);
   else if(state._loanApplicationDraft) renderMeetingLoanApplicationModal(state._loanApplicationDraft.memberId);
   else renderWizard();
@@ -2894,14 +2896,15 @@ function removeDocumentDraft(category,index){
   else if(state._loanApplicationDraft) renderMeetingLoanApplicationModal(state._loanApplicationDraft.memberId);
   else renderWizard();
 }
-async function uploadMemberDocument(memberId,category,file){
+async function uploadMemberDocument(memberId,category,file,context={}){
   const prepared=await optimiseMemberDocument(file,category);
   const businessId=state.staff.business_id;
   const ext=prepared.type==='application/pdf'?'pdf':'jpg';
-  const path=memberDocumentStoragePath(businessId,memberId,category,ext);
+  const path=memberDocumentStoragePath(businessId,memberId,category,ext,context);
   const {error:uploadError}=await sb.storage.from(MEMBER_DOCUMENT_BUCKET).upload(path,prepared,{contentType:prepared.type,cacheControl:'3600',upsert:category==='profile'});
   if(uploadError) throw uploadError;
   const row={business_id:businessId,member_id:memberId,category,storage_path:path,original_name:file.name,mime_type:prepared.type,byte_size:prepared.size,created_by:state.staff.id};
+  if(context.loanApplicationId) row.loan_application_id=context.loanApplicationId;
   const existing=category==='profile' ? memberDocuments(memberId,'profile')[0] : null;
   let result;
   if(existing){
@@ -2917,16 +2920,18 @@ async function uploadMemberDocument(memberId,category,file){
   }
   return result;
 }
-function memberDocumentStoragePath(businessId,memberId,category,ext){
+function memberDocumentStoragePath(businessId,memberId,category,ext,context={}){
   const suffix=category==='profile'?'current':`${Date.now()}-${crypto.randomUUID().slice(0,8)}`;
+  if(category==='loan_form' && context.loanApplicationId) return `${businessId}/${memberId}/${category}/${context.loanApplicationId}/${suffix}.${ext}`;
   return `${businessId}/${memberId}/${category}/${suffix}.${ext}`;
 }
-async function uploadMemberDocuments(memberId,draft,onProgress=()=>{}){
-  const jobs=['profile','business','chattels'].flatMap(category=>(draft[category]||[]).map(file=>({category,file})));
+async function uploadMemberDocuments(memberId,draft,onProgress=()=>{},context={}){
+  const categories=['profile','business','chattels','loan_form'].filter(category=>Array.isArray(draft?.[category]));
+  const jobs=categories.flatMap(category=>(draft[category]||[]).map(file=>({category,file})));
   const failures=[];
   for(let i=0;i<jobs.length;i++){
     const job=jobs[i]; onProgress(i+1,jobs.length,job.file.name);
-    try{ await uploadMemberDocument(memberId,job.category,job.file); }
+    try{ await uploadMemberDocument(memberId,job.category,job.file,context); }
     catch(error){ failures.push(`${job.file.name}: ${error.message}`); }
   }
   return {uploaded:jobs.length-failures.length,failures};
@@ -4104,7 +4109,7 @@ function openMeetingLoanApplication(memberId){
     memberId:member.id,
     productId:products[0]?.id || '',
     notes:'',
-    documents:{profile:[],business:[],chattels:[]}
+    documents:{loan_form:[],business:[],chattels:[]}
   };
   renderMeetingLoanApplicationModal(member.id);
 }
@@ -4129,7 +4134,7 @@ function renderMeetingLoanApplicationModal(memberId){
     memberId:member.id,
     productId:products[0]?.id || '',
     notes:'',
-    documents:{profile:[],business:[],chattels:[]}
+    documents:{loan_form:[],business:[],chattels:[]}
   };
   state._loanApplicationDraft=draft;
   if(!products.some(p=>p.id===draft.productId)) draft.productId=products[0]?.id || '';
@@ -4146,8 +4151,8 @@ function renderMeetingLoanApplicationModal(memberId){
       <div class="field"><label>Officer notes</label><textarea id="la-notes" rows="3" placeholder="Purpose of the loan or meeting remarks">${escapeHtml(draft.notes||'')}</textarea></div>
       <div id="loan-application-preview" style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px"></div>
       <div class="divider"></div>
-      <div class="auth-info">Attach the documents needed for this loan application. Images are compressed before upload; PDFs must be 1 MB or smaller.</div>
-      ${documentPickerHtml('profile',draft.documents.profile,'la-doc-profile')}
+      <div class="auth-info">Attach the signed loan form scan and supporting files for this application. Images are compressed before upload; PDFs must be 1 MB or smaller.</div>
+      ${documentPickerHtml('loan_form',draft.documents.loan_form,'la-doc-loan-form')}
       ${documentPickerHtml('business',draft.documents.business,'la-doc-business')}
       ${documentPickerHtml('chattels',draft.documents.chattels,'la-doc-chattels')}
     </form>`,
@@ -4160,12 +4165,13 @@ function renderMeetingLoanApplicationModal(memberId){
         const band=loanProduct($('la-product').value);
         if(!band) return toast('Select a valid loan product.','error');
         const notes=(state._loanApplicationDraft?.notes||'').trim();
-        const documents=state._loanApplicationDraft?.documents || {profile:[],business:[],chattels:[]};
+        const documents=state._loanApplicationDraft?.documents || {loan_form:[],business:[],chattels:[]};
         const documentCount=Object.values(documents).reduce((n,a)=>n+a.length,0);
         if(documentCount && !navigator.onLine) return toast('An internet connection is required to submit a loan application with documents.','error');
         const submitButton=document.querySelector('#modal-root .btn-primary');
         if(submitButton){submitButton.disabled=true;submitButton.textContent='Submitting application...';}
         try{
+          let createdApplicationId=null;
           if(state.preview){
             const app={
               id:'application-'+Date.now(),business_id:state.staff.business_id,member_id:member.id,
@@ -4180,6 +4186,7 @@ function renderMeetingLoanApplicationModal(memberId){
               created_at:new Date().toISOString(),updated_at:new Date().toISOString()
             };
             state.data.loanApplications.unshift(app);
+            createdApplicationId=app.id;
           }else{
             if(!(await ensureFreshToken())) return;
             const {error}=await sb.rpc('rh_submit_loan_application',{
@@ -4188,21 +4195,25 @@ function renderMeetingLoanApplicationModal(memberId){
             });
             if(error) throw error;
             await refreshLoanWorkflowData();
+            const createdApp=(state.data.loanApplications||[])
+              .filter(a=>a.member_id===member.id && a.group_id===group.id && a.application_date===meeting.date && a.product_id===band.id)
+              .sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''))[0];
+            createdApplicationId=createdApp?.id || null;
           }
           let documentResult={uploaded:0,failures:[]};
           if(documentCount && !state.preview){
             if(submitButton) submitButton.textContent='Preparing documents...';
             documentResult=await uploadMemberDocuments(member.id,documents,(i,n)=>{
               if(submitButton) submitButton.textContent=`Uploading document ${i} of ${n}...`;
-            });
+            },{loanApplicationId:createdApplicationId});
             try{ await refreshMemberDocuments(); }catch(refreshError){ console.warn('Document refresh failed after upload', refreshError); }
           }
           if(documentCount && state.preview){
             const now=new Date().toISOString();
-            ['profile','business','chattels'].forEach(category=>{
+            LOAN_APPLICATION_DOCUMENT_CATEGORIES.forEach(category=>{
               (documents[category]||[]).forEach((file,i)=>state.data.memberDocuments.unshift({
                 id:`preview-loan-doc-${category}-${Date.now()}-${i}`,
-                business_id:state.staff.business_id,member_id:member.id,category,
+                business_id:state.staff.business_id,member_id:member.id,loan_application_id:createdApplicationId,category,
                 original_name:file.name,mime_type:file.type||'image/jpeg',byte_size:file.size,
                 preview_url:draftDocumentUrl(file),created_by:state.staff.id,created_at:now,updated_at:now
               }));
@@ -4302,6 +4313,7 @@ function openLoanApplicationDetails(applicationId){
   const meta=applicationStatusMeta(app.status);
   const isAdmin=state.staff.role==='admin';
   const docs=member ? memberDocuments(member.id).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)) : [];
+  const applicationDocs=docs.filter(d=>d.category==='loan_form' ? (!d.loan_application_id || d.loan_application_id===app.id) : d.category!=='profile');
   const actions=[{label:'Close',onClick:closeModal}];
   if(isAdmin&&['pending','approved'].includes(app.status)) actions.push({label:'Reject',cls:'btn-danger',onClick:()=>openRejectLoanApplication(app.id)});
   if(isAdmin&&app.status==='pending') actions.push({label:'Approve application',cls:'btn-primary',onClick:()=>confirmApproveLoanApplication(app.id)});
@@ -4315,11 +4327,11 @@ function openLoanApplicationDetails(applicationId){
     ${app.notes?`<div style="margin-top:14px"><div class="muted" style="font-size:11px">Officer notes</div><div>${escapeHtml(app.notes)}</div></div>`:''}
     <div style="margin-top:14px">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px">
-        <div><div style="font-weight:700">Loan application documents</div><div class="muted" style="font-size:12px">Profile, business evidence and household chattel files uploaded for this member.</div></div>
+        <div><div style="font-weight:700">Loan application documents</div><div class="muted" style="font-size:12px">Signed loan form scan plus business evidence and household chattel files.</div></div>
         ${member?`<button class="btn btn-sm btn-outline" onclick="state._documentDraft=null;openMemberDocumentsManager(state.data.members.find(x=>x.id==='${member.id}'))">Manage files</button>`:''}
       </div>
-      ${docs.length ? ['profile','business','chattels'].map(category=>{
-        const groupDocs=docs.filter(d=>d.category===category);
+      ${applicationDocs.length ? LOAN_APPLICATION_DOCUMENT_CATEGORIES.map(category=>{
+        const groupDocs=applicationDocs.filter(d=>d.category===category);
         return groupDocs.length ? `<div style="margin-bottom:12px"><div class="muted" style="font-size:11px;margin-bottom:6px">${MEMBER_DOCUMENT_LABELS[category]}</div>${storedDocumentRows(groupDocs)}</div>` : '';
       }).join('') : '<div class="empty" style="padding:18px"><h4>No documents uploaded</h4><p>Ask the officer to attach the files from the loan application form.</p></div>'}
     </div>
@@ -4327,7 +4339,7 @@ function openLoanApplicationDetails(applicationId){
     ${app.rejection_reason?`<div class="auth-error" style="margin-top:14px"><b>Rejection reason:</b> ${escapeHtml(app.rejection_reason)}</div>`:''}
     ${app.status==='approved'?`<div class="auth-info" style="margin-top:14px">Approval does not create a debt. The active loan is created only when an administrator confirms disbursement.</div>`:''}
   `,actions});
-  loadMemberDocumentPreviews(docs);
+  loadMemberDocumentPreviews(applicationDocs);
 }
 
 function confirmApproveLoanApplication(applicationId){
