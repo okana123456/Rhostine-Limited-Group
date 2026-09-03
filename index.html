@@ -598,6 +598,46 @@ const RHOSTINE_LOAN_PRODUCTS = RHOSTINE_PRINCIPALS.flatMap(principal => {
 function loanProduct(id){
   return RHOSTINE_LOAN_PRODUCTS.find(p=>p.id===String(id));
 }
+function memberCompletedLoans(memberId){
+  return state.data.loans.filter(l=>l.member_id===memberId && l.status==='completed').length;
+}
+function loanTermMonths(loan){
+  if(Number(loan?.term_months)) return Number(loan.term_months);
+  const weeks=Number(loan?.term_weeks||0);
+  if(weeks===25) return 6;
+  if(weeks===36) return 9;
+  if(weeks===50) return 12;
+  const match=String(loan?.product_name||loan?.asset_name||'').match(/(\d+)\s*Months?/i);
+  return match ? Number(match[1]) : 6;
+}
+function loanFeeBreakdown(loan){
+  const principal=Number(loan?.loan_value||0);
+  const months=loanTermMonths(loan);
+  const product=loanProduct(`${principal}-${months}`);
+  const totalPayable=Number(loan?.total_payable||0) || Number(product?.totalPayable||0) || (principal + Number(loan?.interest_amount||0));
+  const insuranceFee=Number(product?.insuranceFee ?? (totalPayable * .035));
+  const applicationFee=principal<=35000 ? Number(product?.applicationFee ?? 500) : 0;
+  const processingFee=principal>=40000 ? Number(product?.processingFee ?? (principal * .015)) : 0;
+  const calculatedUpfront=insuranceFee + applicationFee + processingFee;
+  const storedUpfront=Number(loan?.insurance_amount||0);
+  const upfrontDeductions=storedUpfront>0 ? storedUpfront : calculatedUpfront;
+  const otherFee=upfrontDeductions>0 && Math.abs(upfrontDeductions-calculatedUpfront)>1
+    ? Math.max(0,upfrontDeductions-insuranceFee)
+    : applicationFee + processingFee;
+  return {
+    insuranceFee,
+    applicationFee: principal<=35000 ? otherFee : 0,
+    processingFee: principal>=40000 ? otherFee : 0,
+    otherFee,
+    upfrontDeductions,
+    netDisbursement:Number(loan?.net_disbursement||0) || Math.max(0,principal-upfrontDeductions)
+  };
+}
+function loanProductsForMember(member){
+  const completedLoans=memberCompletedLoans(member?.id);
+  const canMigrateSecondCycle=state.staff?.role==='admin' || state.staff?.role==='officer';
+  return RHOSTINE_LOAN_PRODUCTS.filter(p=>p.cycle===1 || completedLoans>0 || canMigrateSecondCycle);
+}
 function loanLabel(loan){
   return loan?.product_name || loan?.asset_name || `Cycle ${loan?.loan_cycle || 1} Cash Loan`;
 }
@@ -4103,8 +4143,8 @@ function openMeetingLoanApplication(memberId){
   if(state.data.loans.some(l=>l.member_id===member.id && l.status==='active')) return toast('This member already has an active loan.','error');
   if(state.data.loanApplications.some(a=>a.member_id===member.id && ['pending','approved'].includes(a.status))) return toast('This member already has an open loan application.','error');
 
-  const completedLoans = state.data.loans.filter(l=>l.member_id===member.id && l.status==='completed').length;
-  const products = RHOSTINE_LOAN_PRODUCTS.filter(p=>p.cycle===1 || completedLoans>0);
+  const completedLoans = memberCompletedLoans(member.id);
+  const products = loanProductsForMember(member);
   state._loanApplicationDraft = {
     memberId:member.id,
     productId:products[0]?.id || '',
@@ -4128,8 +4168,8 @@ function renderMeetingLoanApplicationModal(memberId){
   const member = state.data.members.find(x=>x.id===memberId);
   const group = state.data.groups.find(x=>x.id===meeting?.groupId);
   if(!member || !group || !meeting?.date) return toast('Select a group and meeting date first.','error');
-  const completedLoans = state.data.loans.filter(l=>l.member_id===member.id && l.status==='completed').length;
-  const products = RHOSTINE_LOAN_PRODUCTS.filter(p=>p.cycle===1 || completedLoans>0);
+  const completedLoans = memberCompletedLoans(member.id);
+  const products = loanProductsForMember(member);
   const draft=state._loanApplicationDraft || {
     memberId:member.id,
     productId:products[0]?.id || '',
@@ -4254,7 +4294,7 @@ function loanApplicationPreview(){
       upfront_deductions:band.insurance,net_disbursement:band.netDisbursement,
       application_date:state._meet?.date,term_months:band.months,term_weeks:band.weeks
     },member)}
-    <div class="helper" style="margin-top:10px">The administrator will recheck approved savings, loan history and these terms before approval.</div>`;
+    <div class="helper" style="margin-top:10px">${band.cycle===2 && memberCompletedLoans(member?.id)<1 ? 'Migration mode: this second-cycle loan can be submitted even when the old first-cycle record was not captured.' : 'The administrator will recheck approved savings, loan history and these terms before approval.'}</div>`;
 }
 
 function pageLoanApplications(){
@@ -4352,10 +4392,10 @@ async function reviewLoanApplication(applicationId,action,reason=null){
   const app=state.data.loanApplications.find(a=>a.id===applicationId);
   if(!app) return;
   try{
-    if(state.preview){
-      if(action==='approve'){
-        if(memberSavings(app.member_id)<Number(app.required_savings)) throw new Error('Approved savings are below the required amount');
-        app.status='approved'; app.reviewed_by=state.staff.id; app.reviewed_at=new Date().toISOString(); app.rejection_reason=null;
+        if(state.preview){
+          if(action==='approve'){
+            if(memberSavings(app.member_id)<Number(app.required_savings)) throw new Error('Approved savings are below the required amount');
+            app.status='approved'; app.reviewed_by=state.staff.id; app.reviewed_at=new Date().toISOString(); app.rejection_reason=null;
       }else{
         app.status='rejected'; app.reviewed_by=state.staff.id; app.reviewed_at=new Date().toISOString(); app.rejection_reason=reason;
       }
@@ -4903,8 +4943,8 @@ function openCashLoan(){
         if(!member || !band) return toast('Select a member and loan band.', 'error');
         const activeLoan = state.data.loans.find(l=>l.member_id===member.id && l.status==='active');
         if(activeLoan) return toast('This member already has an active loan.', 'error');
-        const completedLoans = state.data.loans.filter(l=>l.member_id===member.id && l.status==='completed').length;
-        if(band.cycle===2 && completedLoans<1) return toast('A second-cycle loan requires at least one completed first-cycle loan.', 'error');
+        const completedLoans = memberCompletedLoans(member.id);
+        if(band.cycle===2 && completedLoans<1 && !['admin','officer'].includes(state.staff.role)) return toast('A second-cycle loan requires at least one completed first-cycle loan.', 'error');
         const savings = memberSavings(member.id);
         if(savings < band.savings) return toast(`Savings are below the required ${KES(band.savings)}.`, 'error');
         const startDate = $('cl-start').value;
@@ -4939,8 +4979,11 @@ function cashLoanPreview(){
   const savings=member?memberSavings(member.id):0;
   const startDate = $('cl-start')?.value || todayISO();
   const expectedEnd = isFutureISODate(startDate) ? null : addWeeksISO(startDate, band.weeks);
+  const completedLoans = member ? memberCompletedLoans(member.id) : 0;
+  const migrationMode = member && band.cycle===2 && completedLoans<1 && ['admin','officer'].includes(state.staff?.role);
   out.innerHTML=`<div style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:10px"><strong>Cycle ${band.cycle} terms</strong><span class="badge b-green">Confirmed</span></div>
     ${isFutureISODate(startDate) ? `<div class="auth-error">Loan taken date cannot be in the future.</div>` : ''}
+    ${migrationMode ? `<div class="auth-info" style="margin-bottom:10px">Migration mode: this second-cycle loan can be recorded even where the old first-cycle history was not captured.</div>` : ''}
     <div class="grid-3">
       <div><div class="muted" style="font-size:11px">Cash issued</div><b>${KES(band.principal)}</b></div>
       <div><div class="muted" style="font-size:11px">Required savings</div><b>${KES(band.savings)}</b></div>
@@ -5187,7 +5230,22 @@ function buildReportRows(kind){
   });
   if(kind==='loans') return state.data.loans.map(l => {
     const m = state.data.members.find(x=>x.id===l.member_id);
-    return { Member:m?.full_name||' - ', Product:loanLabel(l), Cycle:Number(l.loan_cycle||1), CashIssued:Number(l.loan_value), Insurance:Number(l.insurance_amount||0), Weekly:Number(l.weekly_installment), Paid:loanPaid(l.id), Outstanding:Number(l.total_payable)-loanPaid(l.id), Status:l.status };
+    const fees=loanFeeBreakdown(l);
+    return {
+      Member:m?.full_name||' - ',
+      Product:loanLabel(l),
+      Cycle:Number(l.loan_cycle||1),
+      GrossPrincipal:Number(l.loan_value),
+      InsuranceFee:Number(fees.insuranceFee.toFixed(2)),
+      ApplicationFee:Number(fees.applicationFee.toFixed(2)),
+      ProcessingFee:Number(fees.processingFee.toFixed(2)),
+      UpfrontDeductions:Number(fees.upfrontDeductions.toFixed(2)),
+      NetCashDisbursed:Number(fees.netDisbursement.toFixed(2)),
+      Weekly:Number(l.weekly_installment),
+      Paid:loanPaid(l.id),
+      Outstanding:Number(l.total_payable)-loanPaid(l.id),
+      Status:l.status
+    };
   });
   if(kind==='members') return state.data.members.map(m => {
     const g = state.data.groups.find(x=>x.id===m.group_id);
@@ -6431,6 +6489,14 @@ function pageAccounting(){
   const loansIssued = state.data.loans.filter(l=>inRange(l.start_date||''));
   const totalLoansOut = loansIssued.reduce((a,b)=>a+Number(b.loan_value||0),0);
   const totalExpectedReturn = loansIssued.reduce((a,b)=>a+Number(b.total_payable||0),0);
+  const issuedFeeRows = loansIssued.map(l=>loanFeeBreakdown(l));
+  const totalInsuranceFees = issuedFeeRows.reduce((a,b)=>a+Number(b.insuranceFee||0),0);
+  const totalOtherLoanFees = issuedFeeRows.reduce((a,b)=>a+Number(b.otherFee||0),0);
+  const totalLoanFeeIncome = issuedFeeRows.reduce((a,b)=>a+Number(b.upfrontDeductions||0),0);
+  const totalNetDisbursed = issuedFeeRows.reduce((a,b)=>a+Number(b.netDisbursement||0),0);
+  const totalInflows = totalSavingsIn + totalRepayIn + totalRegFees + totalLoanFeeIncome;
+  const totalOutflows = totalLoansOut + totalExpensesOut;
+  const netCashMovement = totalInflows - totalOutflows;
 
   // === OPERATIONAL EXPENSES ===
   const expensesInPeriod = (state.data.expenses||[]).filter(e=>inRange(e.date||''));
@@ -6470,7 +6536,9 @@ function pageAccounting(){
       <div class="kpi k-success"><div class="l">Savings collected</div><div class="v">${KES(totalSavingsIn)}</div><div class="d">${savingsInPeriod.length} entries</div></div>
       <div class="kpi k-primary"><div class="l">Loan repayments</div><div class="v">${KES(totalRepayIn)}</div><div class="d">Interest ${KES(totalInterestIn)}</div></div>
       <div class="kpi k-success"><div class="l">Registration fees</div><div class="v">${KES(totalRegFees)}</div><div class="d">${uniqueRegMembers.size} member(s) - ${regInstallmentsInPeriod.length} installment(s)</div></div>
+      <div class="kpi k-success"><div class="l">Loan fee income</div><div class="v">${KES(totalLoanFeeIncome)}</div><div class="d">Insurance ${KES(totalInsuranceFees)} + fees ${KES(totalOtherLoanFees)}</div></div>
       <div class="kpi k-warn"><div class="l">Principal disbursed</div><div class="v">${KES(totalLoansOut)}</div><div class="d">${loansIssued.length} loans</div></div>
+      <div class="kpi k-warn"><div class="l">Net cash disbursed</div><div class="v">${KES(totalNetDisbursed)}</div><div class="d">After upfront deductions</div></div>
       <div class="kpi k-primary"><div class="l">Expected return</div><div class="v">${KES(totalExpectedReturn)}</div><div class="d">Interest: ${KES(totalExpectedReturn-totalLoansOut)}</div></div>
       <div class="kpi k-danger"><div class="l">Operational Expenses</div><div class="v">${KES(totalExpensesOut)}</div><div class="d">${expensesInPeriod.length} entr${expensesInPeriod.length!==1?'ies':'y'}</div></div>
     </div>
@@ -6482,12 +6550,15 @@ function pageAccounting(){
           <tr><td style="padding:6px 0;color:var(--text-muted)">Savings received</td><td style="text-align:right;font-weight:600;color:var(--success)">${KES(totalSavingsIn)}</td></tr>
           <tr><td style="padding:6px 0;color:var(--text-muted)">Loan repayments (principal)</td><td style="text-align:right;font-weight:600;color:var(--success)">${KES(totalPrincipalIn)}</td></tr>
           <tr><td style="padding:6px 0;color:var(--text-muted)">Interest income</td><td style="text-align:right;font-weight:600;color:var(--success)">${KES(totalInterestIn)}</td></tr>
+          <tr><td style="padding:6px 0;color:var(--text-muted)">Insurance fee income</td><td style="text-align:right;font-weight:600;color:var(--success)">${KES(totalInsuranceFees)}</td></tr>
+          <tr><td style="padding:6px 0;color:var(--text-muted)">Application / processing fee income</td><td style="text-align:right;font-weight:600;color:var(--success)">${KES(totalOtherLoanFees)}</td></tr>
           <tr><td style="padding:6px 0;color:var(--text-muted)">Registration fee installments (${uniqueRegMembers.size} member(s))</td><td style="text-align:right;font-weight:600;color:var(--success)">${KES(totalRegFees)}</td></tr>
-          <tr><td style="padding:6px 0;border-top:2px solid var(--border);font-weight:700">Total inflows</td><td style="text-align:right;font-weight:700;color:var(--success);border-top:2px solid var(--border)">${KES(totalSavingsIn+totalRepayIn+totalRegFees)}</td></tr>
+          <tr><td style="padding:6px 0;border-top:2px solid var(--border);font-weight:700">Total inflows</td><td style="text-align:right;font-weight:700;color:var(--success);border-top:2px solid var(--border)">${KES(totalInflows)}</td></tr>
           <tr><td style="padding:6px 0;color:var(--text-muted)">Loans disbursed</td><td style="text-align:right;font-weight:600;color:var(--danger)">-${KES(totalLoansOut)}</td></tr>
+          <tr><td style="padding:6px 0;color:var(--text-muted)">Net cash handed to members</td><td style="text-align:right;font-weight:600;color:var(--text-muted)">${KES(totalNetDisbursed)}</td></tr>
           <tr><td style="padding:6px 0;color:var(--text-muted)">Operational expenses (${expensesInPeriod.length})</td><td style="text-align:right;font-weight:600;color:var(--danger)">-${KES(totalExpensesOut)}</td></tr>
-          <tr><td style="padding:6px 0;border-top:2px solid var(--border);font-weight:700">Total outflows</td><td style="text-align:right;font-weight:700;color:var(--danger);border-top:2px solid var(--border)">-${KES(totalLoansOut+totalExpensesOut)}</td></tr>
-          <tr style="background:var(--surface-2)"><td style="padding:10px 6px;font-weight:800;font-size:14px;border-radius:var(--radius-sm) 0 0 var(--radius-sm)">Net cash movement</td><td style="text-align:right;font-weight:800;font-size:16px;padding:10px 6px;border-radius:0 var(--radius-sm) var(--radius-sm) 0;color:${(totalSavingsIn+totalRepayIn+totalRegFees-totalLoansOut-totalExpensesOut)>=0?'var(--success)':'var(--danger)'}">${KES(totalSavingsIn+totalRepayIn+totalRegFees-totalLoansOut-totalExpensesOut)}</td></tr>
+          <tr><td style="padding:6px 0;border-top:2px solid var(--border);font-weight:700">Total outflows</td><td style="text-align:right;font-weight:700;color:var(--danger);border-top:2px solid var(--border)">-${KES(totalOutflows)}</td></tr>
+          <tr style="background:var(--surface-2)"><td style="padding:10px 6px;font-weight:800;font-size:14px;border-radius:var(--radius-sm) 0 0 var(--radius-sm)">Net cash movement</td><td style="text-align:right;font-weight:800;font-size:16px;padding:10px 6px;border-radius:0 var(--radius-sm) var(--radius-sm) 0;color:${netCashMovement>=0?'var(--success)':'var(--danger)'}">${KES(netCashMovement)}</td></tr>
         </table>
       </div>
       <div class="card card-pad">
@@ -7759,9 +7830,33 @@ function exportAccountingReport(){
   // Loans
   const lnRows = state.data.loans.filter(l=>inRange(l.start_date||'')).map(l=>{
     const m=state.data.members.find(x=>x.id===l.member_id);
-    return {Date:l.start_date,Member:m?.full_name,Product:loanLabel(l),Cycle:Number(l.loan_cycle||1),CashIssued:Number(l.loan_value),Insurance:Number(l.insurance_amount||0),Weekly:Number(l.weekly_installment)};
+    const fees=loanFeeBreakdown(l);
+    return {
+      Date:l.start_date,
+      Member:m?.full_name,
+      Product:loanLabel(l),
+      Cycle:Number(l.loan_cycle||1),
+      GrossPrincipal:Number(l.loan_value),
+      InsuranceFee:Number(fees.insuranceFee.toFixed(2)),
+      ApplicationFee:Number(fees.applicationFee.toFixed(2)),
+      ProcessingFee:Number(fees.processingFee.toFixed(2)),
+      UpfrontDeductions:Number(fees.upfrontDeductions.toFixed(2)),
+      NetCashDisbursed:Number(fees.netDisbursement.toFixed(2)),
+      Weekly:Number(l.weekly_installment),
+      TotalPayable:Number(l.total_payable||0)
+    };
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(lnRows), 'Loans issued');
+  const feeRows = lnRows.map(r=>({
+    Date:r.Date,
+    Member:r.Member,
+    Product:r.Product,
+    InsuranceFee:r.InsuranceFee,
+    ApplicationFee:r.ApplicationFee,
+    ProcessingFee:r.ProcessingFee,
+    TotalFeeIncome:r.UpfrontDeductions
+  }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(feeRows), 'Loan fee income');
   XLSX.writeFile(wb, `accounting_${start}_${end}.xlsx`);
   toast('Accounting report exported','success');
 }

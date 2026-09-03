@@ -55,6 +55,14 @@ where routine_schema='public' and routine_name in (
 order by routine_name;
 
 select
+  'review_allows_admin_second_cycle_migration' as check_name,
+  position('A second-cycle loan requires one completed first-cycle loan' in pg_get_functiondef('public.rh_review_loan_application(uuid,text,text)'::regprocedure)) = 0 as passed
+union all
+select
+  'disburse_allows_admin_second_cycle_migration',
+  position('A second-cycle loan requires one completed first-cycle loan' in pg_get_functiondef('public.rh_disburse_loan_application(uuid,date)'::regprocedure)) = 0;
+
+select
   has_table_privilege('authenticated','public.rh_loan_applications','select') as applications_select_allowed,
   has_table_privilege('authenticated','public.rh_loan_applications','insert') as direct_application_insert_allowed,
   has_table_privilege('authenticated','public.rh_loans','insert') as direct_loan_insert_allowed;
