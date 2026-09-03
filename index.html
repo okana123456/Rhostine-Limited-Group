@@ -6495,12 +6495,12 @@ function pageAccounting(){
   const totalLoanFeeIncome = issuedFeeRows.reduce((a,b)=>a+Number(b.upfrontDeductions||0),0);
   const totalNetDisbursed = issuedFeeRows.reduce((a,b)=>a+Number(b.netDisbursement||0),0);
   const totalInflows = totalSavingsIn + totalRepayIn + totalRegFees + totalLoanFeeIncome;
-  const totalOutflows = totalLoansOut + totalExpensesOut;
-  const netCashMovement = totalInflows - totalOutflows;
 
   // === OPERATIONAL EXPENSES ===
   const expensesInPeriod = (state.data.expenses||[]).filter(e=>inRange(e.date||''));
   const totalExpensesOut = expensesInPeriod.reduce((a,b)=>a+Number(b.amount||0),0);
+  const totalOutflows = totalLoansOut + totalExpensesOut;
+  const netCashMovement = totalInflows - totalOutflows;
 
   // === BALANCE SHEET SNAPSHOT ===
   const activeLoans = state.data.loans.filter(l=>l.status==='active');
