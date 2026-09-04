@@ -848,6 +848,10 @@ async function ensureFreshToken(){
 async function afterLogin(offline){
   await loadSettings();
   await loadBillingStatus({ silent:true });
+  if(isInstallmentLocked()){
+    render();
+    return;
+  }
   if(isSubscriptionLocked()){
     render();
     return;
@@ -930,6 +934,11 @@ async function refreshSystemData(){
     await loadStaff();
     await loadSettings();
     await loadBillingStatus({ silent:true });
+    if(isInstallmentLocked()){
+      render();
+      toast('System access is paused until the agreed installment is confirmed.', 'warn');
+      return;
+    }
     await smartLoadAll();
     setupRealtime();
     if(!isSubscriptionLocked()){
@@ -1214,36 +1223,39 @@ function groupSavingsTotal(groupId){
 const $ = id => document.getElementById(id);
 
 /* =====================================================================
- * SUBSCRIPTION LOCK SYSTEM
+ * ONE-TIME CLIENT INSTALLMENT LOCK
  * =====================================================================
- * HOW IT WORKS:
- *   - LOCK_ACTIVE = true  -> admin is blocked from 7am on LOCK_DATE
- *   - LOCK_ACTIVE = false -> system runs normally for everyone
- *   - Officers (role !== 'admin') are NEVER affected regardless of flag
- *
- * TO UNLOCK: Set LOCK_ACTIVE = false and save/re-upload the file.
- *
- * FUTURE: Replace with a Supabase flag in rh_settings for remote control.
+ * This is separate from the monthly subscription lock below.
+ * To reopen Rhostine after payment, set RHOSTINE_INSTALLMENT_LOCK_ACTIVE
+ * to false, commit, and redeploy.
  * ===================================================================== */
-const LOCK_ACTIVE   = false;               // <- flip to false to restore admin
-const LOCK_DATE     = '2026-06-03';       // ISO date the lock activates
-const LOCK_HOUR     = 7;                  // 24-h hour (7 = 7:00 AM)
-const LOCK_AMOUNT   = 'KES 3,000';
-const LOCK_PAYBILL  = '542542';
-const LOCK_ACCOUNT  = '130795';
-const LOCK_BANK     = 'I&M Bank';
-const LOCK_REF      = 'PB-DB-JUN2026';   // reference client should use
-const LOCK_CONTACT  = 'your system provider'; // shown in footer
+const RHOSTINE_INSTALLMENT_LOCK_ACTIVE = true;
+const RHOSTINE_INSTALLMENT_LOCK_DATE = '2026-09-05';
+const RHOSTINE_INSTALLMENT_LOCK_HOUR = 7;
+const RHOSTINE_INSTALLMENT_LOCK_AMOUNT = 'KES 10,000';
+const RHOSTINE_INSTALLMENT_LOCK_PAYBILL = '542542';
+const RHOSTINE_INSTALLMENT_LOCK_ACCOUNT = '130795';
+const RHOSTINE_INSTALLMENT_LOCK_BANK = 'I&M Bank';
+const RHOSTINE_INSTALLMENT_LOCK_REF = 'RHOSTINE-INSTALLMENT';
+const RHOSTINE_INSTALLMENT_LOCK_CONTACT = 'Rudder Research';
 
-function isSubscriptionLocked(){
-  if(!LOCK_ACTIVE) return false;
-  if(!state.staff || state.staff.role !== 'admin') return false; // officers pass freely
-  const now   = new Date();
-  const cutoff = new Date(`${LOCK_DATE}T${String(LOCK_HOUR).padStart(2,'0')}:00:00`);
-  return now >= cutoff;
+function installmentNowParts(){
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone:'Africa/Nairobi',
+    year:'numeric', month:'2-digit', day:'2-digit',
+    hour:'2-digit', minute:'2-digit', hour12:false
+  }).formatToParts(new Date());
+  const pick = t => parts.find(p=>p.type===t)?.value;
+  return { year:pick('year'), month:pick('month'), day:pick('day'), hour:pick('hour'), minute:pick('minute') };
 }
-
-function renderSubscriptionLock(){
+function isInstallmentLocked(){
+  if(!RHOSTINE_INSTALLMENT_LOCK_ACTIVE) return false;
+  const now = installmentNowParts();
+  const nowKey = `${now.year}-${now.month}-${now.day}T${now.hour}:${now.minute}`;
+  const lockKey = `${RHOSTINE_INSTALLMENT_LOCK_DATE}T${String(RHOSTINE_INSTALLMENT_LOCK_HOUR).padStart(2,'0')}:00`;
+  return nowKey >= lockKey;
+}
+function renderInstallmentLock(){
   const app = $('app');
   app.innerHTML = `
     <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -1287,16 +1299,16 @@ function renderSubscriptionLock(){
               <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/>
               <line x1="12" y1="16" x2="12.01" y2="16"/>
             </svg>
-            Subscription suspended
+            Payment installment due
           </div>
 
           <h2 style="margin:0 0 10px;font-size:19px;font-weight:700;color:var(--text);letter-spacing:-.01em">
-            Database access has been suspended
+            Access has been temporarily paused
           </h2>
           <p style="margin:0 0 20px;font-size:13px;color:var(--text-muted);line-height:1.65">
-            Your monthly database subscription of <strong style="color:var(--text)">${LOCK_AMOUNT}</strong>
-            is now due. All your data is safe and fully intact - access will be restored
-            within minutes of payment confirmation.
+            Kindly clear the agreed system installment of <strong style="color:var(--text)">${RHOSTINE_INSTALLMENT_LOCK_AMOUNT}</strong>
+            to continue using Rhostine Limited Groups. All records remain safe and fully intact.
+            Access will be restored promptly once payment is confirmed.
           </p>
 
           <!-- Payment details card -->
@@ -1310,13 +1322,13 @@ function renderSubscriptionLock(){
               Payment details
             </div>
             ${[
-              ['Bank', LOCK_BANK],
-              ['Paybill number', LOCK_PAYBILL],
-              ['Account number', LOCK_ACCOUNT],
-              ['Amount due', `<span style="color:var(--danger);font-weight:700;font-size:15px">${LOCK_AMOUNT}</span>`],
+              ['Bank', RHOSTINE_INSTALLMENT_LOCK_BANK],
+              ['Paybill number', RHOSTINE_INSTALLMENT_LOCK_PAYBILL],
+              ['Account number', RHOSTINE_INSTALLMENT_LOCK_ACCOUNT],
+              ['Amount due', `<span style="color:var(--danger);font-weight:700;font-size:15px">${RHOSTINE_INSTALLMENT_LOCK_AMOUNT}</span>`],
               ['Reference', `<code style="background:var(--surface);border:1px solid var(--border);
                                border-radius:4px;padding:2px 8px;font-size:11px;
-                               font-family:'SF Mono',Menlo,Consolas,monospace">${LOCK_REF}</code>`]
+                               font-family:'SF Mono',Menlo,Consolas,monospace">${RHOSTINE_INSTALLMENT_LOCK_REF}</code>`]
             ].map(([k,v])=>`
               <div style="display:flex;justify-content:space-between;align-items:center;
                           padding:8px 0;border-bottom:1px solid var(--border)">
@@ -1334,8 +1346,8 @@ function renderSubscriptionLock(){
               <line x1="12" y1="16" x2="12.01" y2="16"/>
             </svg>
             <span style="font-size:12px;color:var(--warning);line-height:1.6">
-              After payment, send your <strong>M-Pesa confirmation SMS</strong> to ${LOCK_CONTACT}.
-              Your account will be unlocked promptly once payment is verified.
+              After payment, kindly send the confirmation message to ${RHOSTINE_INSTALLMENT_LOCK_CONTACT}.
+              The system will be reopened once the installment is verified.
             </span>
           </div>
         </div>
@@ -1345,7 +1357,7 @@ function renderSubscriptionLock(){
                     background:var(--surface-2);display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:12px;color:var(--text-muted);line-height:1.5">
             <span style="font-weight:600;color:var(--text)">Need help?</span><br>
-            Contact ${LOCK_CONTACT} to resolve this.
+            Contact ${RHOSTINE_INSTALLMENT_LOCK_CONTACT} to resolve this.
           </div>
           <div style="text-align:right">
             <div style="font-size:10px;color:var(--text-subtle)">Powered by</div>
@@ -1363,13 +1375,6 @@ function renderSubscriptionLock(){
       </div>
     </div>`;
 }
-
-function render(){
-  if(!state.session){ renderAuth(); return; }
-  if(isSubscriptionLocked()){ renderSubscriptionLock(); return; } // <- lock intercept
-  renderShell();
-}
-
 
 /* =====================================================================
  * MONTHLY ADMIN BILLING LOCK
@@ -1606,6 +1611,7 @@ function renderSubscriptionLock(){
 }
 function render(){
   if(!state.session){ renderAuth(); return; }
+  if(isInstallmentLocked()){ renderInstallmentLock(); return; }
   if(isSubscriptionLocked()){ renderSubscriptionLock(); return; }
   renderShell();
   if(shouldShowBillingReminder()){
@@ -7957,6 +7963,7 @@ function loadLocalPreview(){
     }
     await loadSettings();
     await loadBillingStatus({ silent:true });
+    if(isInstallmentLocked()){ render(); return; }
     if(isSubscriptionLocked()){ render(); return; }
     await smartLoadAll();
     setupRealtime();
